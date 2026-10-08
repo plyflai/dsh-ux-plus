@@ -1,0 +1,6 @@
+# dsh-ux-plus 自指行（v2）：只有一行，行 name 解析到本包根。
+# 行 name → 包根是客户端半（dsh.client + exports['./client']）的唯一发现通路；
+# 宿主半从 main 加载。关整卡 = 本层不应用；单能力开关在设置最外层左列的 UX Plus 页（settings.section，order 100）。
+- insert:
+    - id: ux-plus
+      name: 'dsh-ux-plus'

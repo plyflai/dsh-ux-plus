@@ -1,0 +1,68 @@
+{
+  "name": "dsh-ux-plus",
+  "version": "0.1.0",
+  "description": "One DSH UX enhancement package: four feature sub-packages (conversation typography, workspace session menu, workspace recency order, ask-question expanded) behind one Plugins card and one own settings tab.",
+  "license": "MIT",
+  "author": "plyflai <277196217+plyflai@users.noreply.github.com>",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/plyflai/dsh-ux-plus.git",
+    "directory": "."
+  },
+  "homepage": "https://github.com/plyflai/dsh-ux-plus",
+  "bugs": {
+    "url": "https://github.com/plyflai/dsh-ux-plus/issues"
+  },
+  "keywords": [
+    "dsh",
+    "deepseek-harness",
+    "plugin",
+    "bundle",
+    "client-plugin",
+    "ui",
+    "ux",
+    "settings"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "type": "module",
+  "main": "src/index.js",
+  "exports": {
+    ".": "./src/index.js",
+    "./client": "./lib/client.js",
+    "./package.json": "./package.json"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "inject": [
+        "@deepseek-ai/dsh-client-ui-settings",
+        "@deepseek-ai/dsh-api-session-controller",
+        "@deepseek-ai/dsh-api-workspace-controller"
+      ]
+    }
+  },
+  "files": [
+    "cordis.patch.yml",
+    "src/index.js",
+    "features",
+    "lib",
+    "LICENSE",
+    "CHANGELOG.md",
+    "README.md"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "devDependencies": {
+    "tsdown": "^0.22.2"
+  },
+  "scripts": {
+    "test": "node --test tests/*.test.mjs",
+    "build": "tsdown && node scripts/build.js"
+  }
+}

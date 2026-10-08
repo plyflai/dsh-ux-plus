@@ -1,0 +1,12 @@
+{
+  "name": "@dsh-ux-plus/tool-ask-question-expanded",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Reveal the question and its answer in the chat flow by default after the question settles. (private sub-package of dsh-ux-plus: inlined into the package build, never published or installed as a row of its own.)",
+  "type": "module",
+  "main": "src/index.js",
+  "exports": {
+    ".": "./src/index.js",
+    "./package.json": "./package.json"
+  }
+}

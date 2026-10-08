@@ -1,0 +1,12 @@
+{
+  "name": "@dsh-ux-plus/conversation-typography",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Conversation font size and width for the chat area. (private sub-package of dsh-ux-plus: inlined into the package build, never published or installed as a row of its own.)",
+  "type": "module",
+  "main": "src/index.js",
+  "exports": {
+    ".": "./src/index.js",
+    "./package.json": "./package.json"
+  }
+}
