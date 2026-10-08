@@ -29,6 +29,7 @@ async function copySessionId(text) {
 
 /** Mount a native menu row whose owner supplies the exact session ID. */
 export function client(ctx, deps) {
+  if (!deps?.react || !deps?.primitives) return () => {}
   const React = deps.react
   const { MenuItemButton, IconCopyOutlineRegular } = deps.primitives
   const offLocale = ctx.effect(() => ctx.locale.register(NS, {

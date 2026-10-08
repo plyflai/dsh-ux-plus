@@ -1,76 +1,32 @@
 # dsh-ux-plus
 
-DeepSeek Harness（DSH）Web 界面增强包。一个插件提供四项功能，每项都可以单独开关。
+让Deepseek Harness变得更顺手的各种小功能和UX增强包。
 
 [![CI](https://github.com/plyflai/dsh-ux-plus/actions/workflows/ci.yml/badge.svg)](https://github.com/plyflai/dsh-ux-plus/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-| 功能 | 作用 |
+**当前适配：[DeepSeek Harness 0.2.0-rc.1](https://github.com/deepseek-ai/deepseek-harness/releases/tag/dsh-v0.2.0-rc.1) 的 Web 界面。**
+
+## 功能
+
+| 功能 | 用起来有什么好处 |
 | --- | --- |
-| 对话区字号与宽度 | 调整聊天内容的字号和最大宽度，保留原有参数控件 |
-| 复制会话 ID | 在工作区会话行的 `⋯` 菜单里增加复制会话 ID 的入口 |
-| 最近活动排序 | 工作区分组及组内会话按最近更新排列 |
-| 提问结果默认展开 | 提问结束后展开问题与答案，方便回看 |
+| 对话字号与宽度 | **【一键切换】** 选择舒服的字号和阅读宽度。长篇回答看得更轻松，宽屏也能充分利用，不用放大整个界面。 |
+| 复制会话 ID | **【随手复制】** 在会话菜单里一键拿到会话 ID，方便指定会话继续协作、定位记录或排查问题，省去手动翻找和选中文字。 |
+| 最近活动排序 | **【快速找回】** 最近聊过的工作区和会话自动排到前面。多个项目同时推进，也能方便地回到刚才的工作。 |
+| 提问结果默认展开 | **【回看更省事】** 提问结束后，问题和答案直接展开。检查决定、接着讨论时，少一次点击，也少一次找答案。 |
 
 ## 安装
 
-需要 Node.js ≥ 22、PATH 中的 pnpm，以及支持 `dsh.client`、`dsh.bundle.patch` 和 `sidebar.workspaces.session.menu.item` 槽位的 DSH Web profile。
+需要 Node.js ≥ 22、PATH 中的 pnpm，以及一个 DSH Web profile。
 
 ```bash
 dsh plugin --profile <name> add github:plyflai/dsh-ux-plus
 ```
 
-安装后重启该 profile。设置左侧会出现 **UX Plus** 入口。四项功能默认开启，单项开关即时生效，刷新页面后保留设置。
+安装后重启该 profile。打开 **设置 → UX Plus**，即可按需开关各项功能。功能默认开启，单项开关即时生效。
 
-**Plugins 页**上的 `dsh-ux-plus` 卡控制整包启停；**设置 → UX Plus** 控制各项功能。
-
-本仓库包含构建后的 `lib/client.js`，从 GitHub 安装时无需自行构建。当前尚未发布 npm 版本或 GitHub Release。
-
-## 更新与卸载
-
-```bash
-dsh plugin --profile <name> update dsh-ux-plus
-dsh plugin --profile <name> remove dsh-ux-plus
-```
-
-更新或卸载后重启该 profile。部分宿主版本卸载时会留下 profile `cordis.patch.yml` 中的 `ux-plus` 开关覆盖行；若存在该残留，请删除该行。
-
-## 从旧插件迁移
-
-本包整合了 `dsh-ui-tweak`、`dsh-session-id-menu` 和 `dsh-workspace-folder-order` 的能力。已使用旧插件的用户应移除旧包及旧 patch 引用，再启用本包，避免重复挂载同一功能。
-
-对话区字号和宽度沿用 `ui-tweak` 设置 namespace。四项功能的开关存储在 `ux-plus` namespace。
-
-## 行为与兼容性
-
-- 最近活动排序调整视觉顺序，按更新时间降序、相同时间按 ID 升序排列。即使宿主选择手动排序，本项开启时仍以最近活动为准；当前未命名的新会话保持首位。
-- 提问结果展开只处理 `ask_user_question` 工具卡。紧凑模式中的工具调用组仍需手动展开。
-- 对话区字号与宽度只作用于聊天内容。宿主外观设置中的全局字号继续在自身作用域生效。
-- 会话 ID 菜单使用宿主原生槽位，由宿主传入准确的会话 ID。排序和提问展开使用宿主 DOM 结构，对话排版使用宿主 CSS token。宿主升级后，槽位、选择器或 token 变化可能影响这些功能；遇到问题可关闭单项，并附宿主版本提交 [Issue](https://github.com/plyflai/dsh-ux-plus/issues)。
-
-## 开发
-
-```bash
-git clone https://github.com/plyflai/dsh-ux-plus.git
-cd dsh-ux-plus
-npm ci
-npm test
-npm run build
-npm pack
-```
-
-构建生成 `lib/client.js`，并检查宿主半语法、客户端注册 ID、经典脚本格式和允许的运行时模块。CI 在 Node.js 22 和 24 上运行测试、构建和打包检查。
-
-```text
-src/                宿主入口、客户端入口与开关管理
-features/           四项功能的内部模块
-lib/client.js       随仓库及安装包分发的浏览器产物
-tests/              包结构、开关、排序和提问展开测试
-scripts/build.js    构建产物检查
-cordis.patch.yml    整包的自指加载行
-```
-
-`features/` 下的模块随 `dsh-ux-plus` 一起分发，不单独安装或发布。修改客户端源码后需重新构建，并提交 `lib/client.js`。
+对话字号和宽度在 **设置 → 通用 → 对话区** 调整。
 
 ## License
 

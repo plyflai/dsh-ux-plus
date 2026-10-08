@@ -1,7 +1,7 @@
 {
   "name": "dsh-ux-plus",
   "version": "0.1.0",
-  "description": "One DSH UX enhancement package: four feature sub-packages (conversation typography, workspace session menu, workspace recency order, ask-question expanded) behind one Plugins card and one own settings tab.",
+  "description": "让Deepseek Harness变得更顺手的各种小功能和UX增强包。",
   "license": "MIT",
   "author": "plyflai <277196217+plyflai@users.noreply.github.com>",
   "repository": {
@@ -31,7 +31,8 @@
   "exports": {
     ".": "./src/index.js",
     "./client": "./lib/client.js",
-    "./package.json": "./package.json"
+    "./package.json": "./package.json",
+    "./ui-tweak": "./src/ui-tweak.js"
   },
   "dsh": {
     "bundle": {
@@ -48,7 +49,7 @@
   },
   "files": [
     "cordis.patch.yml",
-    "src/index.js",
+    "src",
     "features",
     "lib",
     "LICENSE",
@@ -64,5 +65,8 @@
   "scripts": {
     "test": "node --test tests/*.test.mjs",
     "build": "tsdown && node scripts/build.js"
+  },
+  "dependencies": {
+    "@deepseek-ai/schemastery": "3.18.4"
   }
 }

@@ -27,12 +27,13 @@ function insertRows(yaml) {
   return rows
 }
 
-test('patch declares exactly one self-referential row, stable id, name == package name', async () => {
+test('patch loads the main plugin and its typography configuration entry', async () => {
   const rows = insertRows(await readFile(new URL('cordis.patch.yml', root), 'utf8'))
-  assert.equal(rows.length, 1)
+  assert.equal(rows.length, 2)
   assert.equal(rows[0].id, 'ux-plus')
   const manifest = await readJson('package.json')
   assert.equal(rows[0].name, manifest.name)
+  assert.deepEqual(rows[1], { id: 'ui-tweak', name: `${manifest.name}/ui-tweak` })
 })
 
 test('manifest declares the host entry, the browser entry, and a well-formed dsh.client', async () => {
@@ -40,6 +41,9 @@ test('manifest declares the host entry, the browser entry, and a well-formed dsh
   assert.equal(manifest.dsh?.bundle?.patch, './cordis.patch.yml')
   assert.equal(manifest.main, 'src/index.js')
   assert.equal(manifest.exports?.['.'], './src/index.js')
+  assert.equal(manifest.exports?.['./ui-tweak'], './src/ui-tweak.js')
+  await readFile(new URL(manifest.exports['./ui-tweak'], root))
+  assert.ok(manifest.files.includes('src'), 'the packed package includes the typography entry')
   const clientExport = manifest.exports?.['./client']
   const clientTarget = typeof clientExport === 'string' ? clientExport : clientExport?.default
   assert.equal(typeof clientTarget, 'string')
@@ -69,30 +73,16 @@ test('the package no longer depends on the legacy feature packages', async () =>
   }
 })
 
-test('host half registers the ux-plus switch section (all-true) and the ui-tweak section', async () => {
+test('host entries expose writable UX Plus and typography configurations', async () => {
   const host = await import(new URL('src/index.js', root).href)
-  const registered = []
-  const ctx = {
-    inject: (names, callback) => {
-      if (names.includes('settings')) callback({ settings: { register: (ns, schema) => registered.push({ ns, schema }) } })
-    },
-  }
+  const ctx = {}
   const dispose = host.apply(ctx)
-  // P3: the conversation-typography feature host (plan D7) registers the
-  // durable `ui-tweak` section in addition to the ux-plus switch section.
-  assert.deepEqual(registered.map((row) => row.ns).sort(), ['ui-tweak', 'ux-plus'])
-  const ux = registered.find((row) => row.ns === 'ux-plus')
-  assert.deepEqual(ux.schema(undefined), Object.fromEntries(FEATURES.map((name) => [name, true])))
-  assert.deepEqual(ux.schema({ [FEATURES[0]]: false }), Object.fromEntries(FEATURES.map((name) => [name, name !== FEATURES[0]])))
-  assert.deepEqual(ux.schema.toJSON().properties, Object.fromEntries(FEATURES.map((name) => [name, { type: 'boolean' }])))
-  const tweak = registered.find((row) => row.ns === 'ui-tweak')
-  assert.deepEqual(tweak.schema(undefined), { fontSize: 'l', chatWidth: 'l' })
-  assert.deepEqual(tweak.schema({ fontSize: 'xl', chatWidth: 's' }), { fontSize: 'xl', chatWidth: 's' })
-  assert.deepEqual(tweak.schema.toJSON().properties, {
-    fontSize: { type: 'string', enum: ['xs', 's', 'm', 'l', 'xl'] },
-    chatWidth: { type: 'string', enum: ['s', 'm', 'l', 'xl'] },
-  })
-  assert.throws(() => tweak.schema({ fontSize: 'nope' }), TypeError)
+  assert.deepEqual(host.Config({}).get(), Object.fromEntries(FEATURES.map((name) => [name, true])))
+  assert.deepEqual(host.Config({ [FEATURES[0]]: false }).get(), Object.fromEntries(FEATURES.map((name) => [name, name !== FEATURES[0]])))
+  const tweak = await import(new URL('src/ui-tweak.js', root).href)
+  assert.deepEqual(tweak.Config({}).get(), { fontSize: 'l', chatWidth: 'l' })
+  assert.deepEqual(tweak.Config({ fontSize: 'xl', chatWidth: 's' }).get(), { fontSize: 'xl', chatWidth: 's' })
+  assert.throws(() => tweak.Config({ fontSize: 'nope' }).get())
   dispose()
   for (const name of FEATURES) {
     const mod = await import(new URL(`features/${name}/src/index.js`, root).href)

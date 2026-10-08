@@ -10,7 +10,7 @@
  * Switch behavior (plan D5) lives in `./switches.js` (the React-free
  * `mountFeatures` engine, unit-tested in plain Node); this entry adds the
  * browser surface:
- *   - the two `settingsScope.bind` calls at plugin level, so the switch
+ *   - the two `configForms.get` calls at plugin level, so the switch
  *     subscription survives tab unmount (the tab only renders state);
  *   - the React seed (rider `deps.react`) and the `sessions`/`workspaces`
  *     services, declared in `inject` so the runtime parks this module until
@@ -21,9 +21,8 @@
  *     thunk returning the constant brand name `UX Plus` (language-neutral,
  *     re-read on every projection).
  *
- * Reading/writing switches goes through the `settingsScope` service bound to
- * `ux-plus` — no localStorage of our own (plan §3.10 forbids a second
- * storage source).
+ * Reading/writing switches goes through the `configForms` service bound to
+ * the host entries `ux-plus` and `ui-tweak`.
  */
 import * as React from 'react'
 import { MenuItemButton, IconCopyOutlineRegular } from '@deepseek-ai/dsh-client-ui-primitives'
@@ -41,7 +40,7 @@ import { FEATURES, mountFeatures } from './switches.js'
  * too early (before the session/workspace providers mounted) and its two
  * DOM features silently no-op'd. Both names exist on the web-app surface.
  */
-export const inject = ['slots', 'settingsScope', 'sessions', 'workspaces']
+export const inject = ['slots', 'locale', 'configForms', 'sessions', 'workspaces']
 
 /**
  * Self-contained toggle switch built only on the `react` seed.
@@ -155,8 +154,8 @@ function UxPlusTab(props) {
 export function apply(ctx) {
   // Plugin-level binds: the bind lifecycle belongs to this plugin's fiber,
   // so the switch subscription survives tab unmounts.
-  const uxScope = ctx.settingsScope.bind({ namespace: 'ux-plus' })
-  const tweakScope = ctx.settingsScope.bind({ namespace: 'ui-tweak' })
+  const uxScope = ctx.configForms.get('ux-plus')
+  const tweakScope = ctx.configForms.get('ui-tweak')
 
   // deps built once, shared by every feature: React (seed) rides here, and
   // the session/workspace services are read via ctx.get — safe at apply time

@@ -313,22 +313,18 @@ test('the ux-plus switch keys are exactly the four frozen feature ids', async ()
     assert.equal(typeof feature.client, 'function')
   }
   const host = await import(new URL('src/index.js', root).href)
-  const registered = []
-  const ctx = {
-    inject: (names, callback) => {
-      if (names.includes('settings')) callback({ settings: { register: (ns, schema) => registered.push({ ns, schema }) } })
-    },
-  }
+  const ctx = {}
   const dispose = host.apply(ctx)
-  const ux = registered.find((row) => row.ns === 'ux-plus')
-  assert.ok(ux, 'host half registers the ux-plus section')
-  assert.deepEqual(Object.keys(ux.schema(undefined)).sort(), [...FROZEN].sort())
+  assert.deepEqual(Object.keys(host.Config({}).get()).sort(), [...FROZEN].sort())
   dispose()
 })
 
-test('every source file imports only the nine seeds or relative paths', async () => {
+test('source imports use declared dependencies, shell seeds, or relative paths', async () => {
+  const manifest = JSON.parse(await readFile(new URL('package.json', root), 'utf8'))
+  const allowed = [...SEEDS, ...Object.keys(manifest.dependencies || {})]
   const files = [
     'src/index.js',
+    'src/ui-tweak.js',
     'src/client.js',
     'src/switches.js',
     ...FROZEN.map((name) => `features/${name}/src/index.js`),
@@ -339,7 +335,7 @@ test('every source file imports only the nine seeds or relative paths', async ()
     for (const match of text.matchAll(/\bfrom\s+['"]([^'"]+)['"]/g)) specs.add(match[1])
     for (const match of text.matchAll(/\bimport\s*\(\s*['"]([^'"]+)['"]\s*\)/g)) specs.add(match[1])
     for (const match of text.matchAll(/\brequire\s*\(\s*['"]([^'"]+)['"]\s*\)/g)) specs.add(match[1])
-    const foreign = [...specs].filter((spec) => !spec.startsWith('./') && !spec.startsWith('../') && !SEEDS.includes(spec))
+    const foreign = [...specs].filter((spec) => !spec.startsWith('./') && !spec.startsWith('../') && !allowed.includes(spec))
     assert.deepEqual(foreign, [], `${file} imports non-seed specifiers: ${foreign.join(', ')}`)
   }
 })

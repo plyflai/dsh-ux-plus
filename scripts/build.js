@@ -111,6 +111,7 @@ if (artifact !== null) {
 // Hand-written halves: parse only.
 const jsFiles = [
   'src/index.js',
+  'src/ui-tweak.js',
   'src/client.js',
   'src/switches.js',
   'features/conversation-typography/src/index.js',

@@ -17,6 +17,7 @@ import { feature as conversationTypography } from '../features/conversation-typo
 import { feature as workspaceSessionMenu } from '../features/workspace-session-menu/src/index.js'
 import { feature as workspaceRecencyOrder } from '../features/workspace-recency-order/src/index.js'
 import { feature as toolAskQuestionExpanded } from '../features/tool-ask-question-expanded/src/index.js'
+import z from '@deepseek-ai/schemastery'
 
 /** Stable Cordis plugin name. */
 export const name = 'dsh-ux-plus'
@@ -26,6 +27,15 @@ export const UX_PLUS_NAMESPACE = 'ux-plus'
 
 /** The four feature modules in frozen order. */
 export const FEATURES = [conversationTypography, workspaceSessionMenu, workspaceRecencyOrder, toolAskQuestionExpanded]
+
+
+/** Host configuration for the per-feature UX Plus switches. */
+export const Config = z.object({
+  'conversation-typography': z.boolean().default(true),
+  'workspace-session-menu': z.boolean().default(true),
+  'workspace-recency-order': z.boolean().default(true),
+  'tool-ask-question-expanded': z.boolean().default(true),
+}).volatile()
 
 /**
  * Local callable schema for the ux-plus section: validate + normalize.
@@ -56,9 +66,6 @@ UX_PLUS_SCHEMA.toJSON = () => ({
  */
 export function apply(ctx) {
   const disposers = []
-  ctx.inject(['settings'], (settingsCtx) => {
-    settingsCtx.settings.register(UX_PLUS_NAMESPACE, UX_PLUS_SCHEMA)
-  })
   for (const feature of FEATURES) {
     if (feature.host !== undefined) disposers.push(feature.host(ctx))
   }

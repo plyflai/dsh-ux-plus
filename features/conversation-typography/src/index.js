@@ -190,9 +190,6 @@ let release = undefined
  */
 export function attach(ctx) {
   dispose()
-  ctx.inject(['settings'], (settingsCtx) => {
-    settingsCtx.settings.register(UI_TWEAK_NAMESPACE, UI_TWEAK_SCHEMA)
-  })
   // The ux-plus/ui-tweak sections are owned by the settings service's own
   // effect; the feature installation itself has no owned resources.
   release = () => {
