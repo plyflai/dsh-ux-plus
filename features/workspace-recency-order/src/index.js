@@ -11,7 +11,9 @@
  *                             grouped Workspace tree's visual recency
  *                             ordering — group layer (workspace sections by
  *                             their latest member session activity, freshest
- *                             first) plus row layer (each section's own
+ *                             first; archive-invariant, so archiving a
+ *                             conversation never moves its workspace section)
+ *                             plus row layer (each section's own
  *                             session rows by session updatedAt). Only the
  *                             visual order changes: React child order,
  *                             host store state (orderBy /
@@ -108,15 +110,22 @@ function owningParentFolder(path, parents) {
 }
 
 /**
- * Most recent non-blank, non-subagent, non-archived update in a workspace
- * (the group-layer activity signal; no-update groups carry -Infinity).
+ * Most recent non-blank, non-subagent update in a workspace (the group-layer
+ * activity signal; no-update groups carry -Infinity).
+ *
+ * Archive state is deliberately NOT an input. The host keeps an archived
+ * session in its workspace `sessionIds` slot (workspace/src/index.ts:336-339:
+ * "Archiving never touches workspace accounting"), so archiving or restoring a
+ * conversation leaves this maximum untouched — the workspace section keeps its
+ * rank. Excluding archived members instead made the freshest session's
+ * archive drop the whole workspace to its next-newest member's timestamp: a
+ * jump caused purely by hiding a row, not by any change in activity.
  */
-function latestSessionUpdate(workspace, byId, archived) {
+function latestSessionUpdate(workspace, byId) {
   let latest = Number.NEGATIVE_INFINITY
   for (const sessionId of workspace.sessionIds) {
     const session = byId[sessionId]
     if (session === undefined || session.blank || session.origin === 'subagent') continue
-    if (archived.has(sessionId)) continue
     if (session.updatedAt > latest) latest = session.updatedAt
   }
   return latest
@@ -422,7 +431,11 @@ function makeStyleCache() {
   return { write, clear }
 }
 
-/** The ungrouped bucket's activity: latest visible session owned by no workspace. */
+/**
+ * The ungrouped bucket's activity: latest session owned by no workspace. Same
+ * archive-invariance rule as latestSessionUpdate — a stray conversation being
+ * archived must not move the bucket either.
+ */
 function bucketActivity(data) {
   const owned = new Set()
   for (const workspace of data.items) {
@@ -431,7 +444,6 @@ function bucketActivity(data) {
   let latest = Number.NEGATIVE_INFINITY
   for (const session of Object.values(data.byId)) {
     if (session.origin === 'subagent' || session.blank) continue
-    if (data.archived.has(session.id)) continue
     if (owned.has(session.id)) continue
     if (session.updatedAt > latest) latest = session.updatedAt
   }
@@ -570,7 +582,7 @@ function orderLevel(container, workspaces, topLevel, data, view) {
     index,
     activity: pair.workspace === null
       ? bucketActivity(data)
-      : latestSessionUpdate(pair.workspace, data.byId, data.archived),
+      : latestSessionUpdate(pair.workspace, data.byId),
   }))
   ranked.sort((a, b) => {
     if (a.activity === b.activity) return a.index - b.index

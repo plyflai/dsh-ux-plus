@@ -248,7 +248,7 @@ function buildTree(env, sectionSpecs) {
 // Mount helper: fake DOM + list stores + the real feature client.
 // ---------------------------------------------------------------------------
 
-async function mount({ sections, sessions, workspaces, storage }) {
+async function mount({ sections, sessions, workspaces, storage, archived = [] }) {
   const env = makeEnv()
   installGlobals(env)
   const built = buildTree(env, sections)
@@ -266,7 +266,7 @@ async function mount({ sections, sessions, workspaces, storage }) {
   const workspacesStore = makeListStore({
     phase: 'ready',
     items: workspaces,
-    archivedSessionIds: [],
+    archivedSessionIds: archived,
   })
   const { feature } = await import(new URL('features/workspace-recency-order/src/index.js', root).href)
   const dispose = feature.client({}, {
@@ -936,4 +936,103 @@ test('a flat list tree or a search tree receives no style.order at all (findTree
       uninstallGlobals(m.env)
     }
   }
+})
+
+// ---------------------------------------------------------------------------
+// Group-layer archive invariance: archiving a conversation must never move the
+// workspace section. The host keeps an archived session in its workspace
+// sessionIds slot (workspace/workspace/src/index.ts:336-339 — "Archiving never
+// touches workspace accounting"), so the group activity signal
+// (latestSessionUpdate / bucketActivity) reads every member regardless of
+// archive state; only the row layer hides archived rows (host visibility).
+// ---------------------------------------------------------------------------
+
+/** Mount, snapshot the painted visual order of every section and row, tear down. */
+async function paint(spec) {
+  const m = await mount(spec)
+  try {
+    return m.sections.map((entry) => ({
+      group: entry.section.style.order,
+      rows: Object.fromEntries(Object.entries(entry.rows).map(([id, wrap]) => [id, wrap.style.order])),
+    }))
+  } finally {
+    m.tearDown()
+  }
+}
+
+const INVARIANT_SESSIONS = [
+  session('a1', 'A one', 500),
+  session('a2', 'A two', 100),
+  session('b1', 'B one', 300),
+]
+const INVARIANT_WORKSPACES = [
+  { workspaceId: 'wa', path: '/proj/A', title: 'A', sessionIds: ['a1', 'a2'] },
+  { workspaceId: 'wb', path: '/proj/B', title: 'B', sessionIds: ['b1'] },
+]
+const SECTION_A_OPEN = { title: 'A', rows: [{ id: 'a1', text: 'A one6分钟' }, { id: 'a2', text: 'A two6分钟' }] }
+const SECTION_A_ARCHIVED = { title: 'A', rows: [{ id: 'a2', text: 'A two6分钟' }] }
+const SECTION_B = { title: 'B', rows: [{ id: 'b1', text: 'B one6分钟' }] }
+
+test('archiving the freshest conversation does not move its workspace down', async () => {
+  // The reported jump: A's newest session (500) is archived, so the old
+  // activity ruler dropped A to its next-newest member (100) and B (300)
+  // overtook it — the whole folder slid down because one row was hidden.
+  const open = await paint({
+    sessions: INVARIANT_SESSIONS,
+    workspaces: INVARIANT_WORKSPACES,
+    sections: [SECTION_A_OPEN, SECTION_B],
+  })
+  const archived = await paint({
+    sessions: INVARIANT_SESSIONS,
+    workspaces: INVARIANT_WORKSPACES,
+    archived: ['a1'],
+    sections: [SECTION_A_ARCHIVED, SECTION_B],
+  })
+  assert.equal(open[0].group, '0', 'A (activity 500) outranks B (300) before the archive')
+  assert.equal(open[1].group, '1')
+  assert.deepEqual(archived.map((entry) => entry.group), ['0', '1'],
+    'archiving A\'s freshest row leaves both sections exactly where they were')
+  assert.equal(archived[0].rows.a2, '10', 'the row layer still hides the archived row and ranks what is left')
+  assert.equal(archived[1].rows.b1, '10')
+})
+
+test('archiving every conversation of a workspace leaves the section pinned', async () => {
+  // The same rule taken to its end: an empty-looking section must not fall to
+  // the no-activity tail either — that would be the identical jump, just
+  // triggered by the last visible row.
+  const archived = await paint({
+    sessions: INVARIANT_SESSIONS,
+    workspaces: INVARIANT_WORKSPACES,
+    archived: ['a1', 'a2'],
+    sections: [{ title: 'A', rows: [] }, SECTION_B],
+  })
+  assert.deepEqual(archived.map((entry) => entry.group), ['0', '1'],
+    'A keeps rank 0 with every member archived; B does not slide up')
+})
+
+test('archiving a stray conversation does not move the ungrouped bucket', async () => {
+  // bucketActivity follows the same ruler: the stray session at 500 keeps the
+  // bucket first whether or not it is archived.
+  const sessions = [session('a1', 'A one', 100), session('x1', 'X one', 500)]
+  const workspaces = [{ workspaceId: 'wa', path: '/proj/A', title: 'A', sessionIds: ['a1'] }]
+  const open = await paint({
+    sessions,
+    workspaces,
+    sections: [
+      { title: 'A', rows: [{ id: 'a1', text: 'A one6分钟' }] },
+      { title: '未分组', rows: [{ id: 'x1', text: 'X one6分钟' }] },
+    ],
+  })
+  const archived = await paint({
+    sessions,
+    workspaces,
+    archived: ['x1'],
+    sections: [
+      { title: 'A', rows: [{ id: 'a1', text: 'A one6分钟' }] },
+      { title: '未分组', rows: [] },
+    ],
+  })
+  assert.deepEqual(open.map((entry) => entry.group), ['1', '0'], 'the bucket (500) outranks A (100)')
+  assert.deepEqual(archived.map((entry) => entry.group), ['1', '0'],
+    'archiving the stray session leaves the bucket where it was')
 })
