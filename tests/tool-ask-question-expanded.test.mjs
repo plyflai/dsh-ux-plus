@@ -378,10 +378,12 @@ test('W-14: settled ask rows get the notice-blue wash and white text', async () 
     const f = await import(FEATURE)
     const cleanup = f.client(undefined, undefined)
     const css = env.document.head.children.find((c) => c.tagName === 'STYLE').textContent
-    // Scope: settled rows only — a running row keeps the host shimmer.
+    // The wash covers every ask row — the live question included…
+    assert.ok(css.includes('[data-tool="ask_user_question"] {\n'), 'the wash must not be gated on state')
+    // …while the text recolor is settled-only, so the shimmer keeps animating.
     assert.ok(
-      css.includes('[data-tool="ask_user_question"]:not([data-state="running"]):not([data-state="preparing"])'),
-      'the rules must be gated on settled ask rows',
+      css.includes('[data-tool="ask_user_question"]:not([data-state="running"]):not([data-state="preparing"]) :is('),
+      'the text rules must be gated on settled ask rows',
     )
     // The blue is the design system's notice/info token, never a literal.
     assert.ok(css.includes('--ux-plus-notice: var(--dsw-alias-button-info-fill)'))

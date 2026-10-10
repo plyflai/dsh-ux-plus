@@ -43,8 +43,9 @@
  *     (see `accentCss`). Tokens only — `--dsw-alias-button-info-fill` is the
  *     design system's info/notice blue and the two label tiers flip with the
  *     theme, so the block reads white-on-blue in dark and near-black on a
- *     light-blue wash in light. Running/preparing rows are excluded so the
- *     host shimmer keeps working.
+ *     light-blue wash in light. Every ask row gets the wash — the question
+ *     waiting for an answer included; only the text recolor is skipped on
+ *     running/preparing rows so the host shimmer keeps animating.
  */
 
 export const id = 'tool-ask-question-expanded'
@@ -59,10 +60,11 @@ const ROW_SELECTOR = '[data-conversation-scroll] [data-tool="ask_user_question"]
 const DISCLOSURE_SELECTOR = '[data-disclosure-row]'
 
 /**
- * CSS scope (W-14): settled ask rows only. A running row keeps the host's
+ * Text scope (W-14): settled ask rows only. A running row keeps the host's
  * shimmer (its text color is animated through a pseudo-element, and forcing a
- * color there breaks the sweep) and is the open question the user is answering
- * right now, not a record to highlight.
+ * color there breaks the sweep). The wash itself is NOT gated this way — the
+ * question waiting for an answer should be highlighted too, it just keeps its
+ * own animated text colors while it is live.
  */
 const ROW_CSS_SCOPE = ROW_SELECTOR +
   ':not([data-state="running"]):not([data-state="preparing"])'
@@ -86,15 +88,16 @@ const ROW_CSS_SCOPE = ROW_SELECTOR +
  */
 function accentCss() {
   return [
-    // The block: a notice-blue wash instead of the invisible tool row.
-    ROW_CSS_SCOPE + ' {',
+    // The block: a notice-blue wash instead of the invisible tool row. Every
+    // ask row gets it, the live question included.
+    ROW_SELECTOR + ' {',
     '  --ux-plus-notice: var(--dsw-alias-button-info-fill);',
     '  background: color-mix(in srgb, var(--ux-plus-notice) 20%, transparent);',
     '  border-radius: var(--dsw-radius-lg);',
     '  padding: 4px 8px;',
     '}',
     // The transcript card rides the wash instead of dropping a gray plate on it.
-    ROW_CSS_SCOPE + ' [class*="_card"] {',
+    ROW_SELECTOR + ' [class*="_card"] {',
     '  background: color-mix(in srgb, var(--ux-plus-notice) 14%, transparent);',
     '  border-color: color-mix(in srgb, var(--ux-plus-notice) 45%, transparent);',
     '}',
