@@ -19,12 +19,16 @@
  *   - W-4: a WeakSet records every disclosure row we expanded; the same
  *     element is never clicked again (a manual collapse persists until the
  *     element is gone), a new element (row reappears) is expanded again.
- *   - W-5 zero injection: no `<style>`, no attribute add/change, no node
- *     insert, no localStorage/settings/store writes — dispatching the host's
- *     own click is the entire surface.
+ *   - W-5 zero injection (revised by W-14): no attribute add/change, no node
+ *     insert into the conversation, no localStorage/settings/store writes —
+ *     dispatching the host's own click is still the entire behavioral
+ *     surface. The one DOM addition is a single plugin-owned `<style>` in
+ *     `<head>` (W-14); it adds no element to the document body and touches no
+ *     host node.
  *   - W-6 off == never installed: the disposer reverse-collapses exactly
- *     the rows we expanded (still connected and currently open), then
- *     disconnects the observer and clears the pending scan.
+ *     the rows we expanded (still connected and currently open), removes the
+ *     plugin-owned `<style>`, then disconnects the observer and clears the
+ *     pending scan.
  *   - W-7: one `MutationObserver` on `document.body`
  *     (`childList` + `subtree` + `attributeFilter: ['data-state']`)
  *     coalesced into a single 0-delay scan; the click itself only changes
@@ -34,6 +38,13 @@
  *     (input/textarea/contenteditable) still in the tree, focus goes back.
  *   - Group layer: NOT done (W-11) — the host's compact-mode "N tool calls"
  *     group stays host-native (its collapse markup is untouched by design).
+ *   - W-14 notice-blue block: a settled ask row gets a notice-blue wash and
+ *     white/white-tone text instead of the host's monochrome tool-row chrome
+ *     (see `accentCss`). Tokens only — `--dsw-alias-button-info-fill` is the
+ *     design system's info/notice blue and the two label tiers flip with the
+ *     theme, so the block reads white-on-blue in dark and near-black on a
+ *     light-blue wash in light. Running/preparing rows are excluded so the
+ *     host shimmer keeps working.
  */
 
 export const id = 'tool-ask-question-expanded'
@@ -48,6 +59,80 @@ const ROW_SELECTOR = '[data-conversation-scroll] [data-tool="ask_user_question"]
 const DISCLOSURE_SELECTOR = '[data-disclosure-row]'
 
 /**
+ * CSS scope (W-14): settled ask rows only. A running row keeps the host's
+ * shimmer (its text color is animated through a pseudo-element, and forcing a
+ * color there breaks the sweep) and is the open question the user is answering
+ * right now, not a record to highlight.
+ */
+const ROW_CSS_SCOPE = ROW_SELECTOR +
+  ':not([data-state="running"]):not([data-state="preparing"])'
+
+/**
+ * The notice-blue treatment (W-14). The host renders an ask row in the
+ * monochrome tool-row chrome — title, summary and the question text all sit on
+ * the dimmed label tiers, so a settled question reads as one gray smear.
+ *
+ * Tokens, not colors: `--dsw-alias-button-info-fill` is the design system's
+ * info/notice blue (design-platform.css:201/316, per theme), and the two label
+ * tiers are white in the dark theme and near-black in the light one, so the
+ * block stays legible in both instead of hard-coding white-on-blue.
+ *
+ * The card's own classes are CSS-module hashes, so the rules reach them
+ * through `[class*="_name"]` — the same handle the typography feature uses for
+ * the host bubble. Attribute selectors also out-specify the host's single-class
+ * rules, including its `:hover` recolors, without `!important`.
+ *
+ * @returns {string} the CSS text for the plugin-owned <style>.
+ */
+function accentCss() {
+  return [
+    // The block: a notice-blue wash instead of the invisible tool row.
+    ROW_CSS_SCOPE + ' {',
+    '  --ux-plus-notice: var(--dsw-alias-button-info-fill);',
+    '  background: color-mix(in srgb, var(--ux-plus-notice) 20%, transparent);',
+    '  border-radius: var(--dsw-radius-lg);',
+    '  padding: 4px 8px;',
+    '}',
+    // The transcript card rides the wash instead of dropping a gray plate on it.
+    ROW_CSS_SCOPE + ' [class*="_card"] {',
+    '  background: color-mix(in srgb, var(--ux-plus-notice) 14%, transparent);',
+    '  border-color: color-mix(in srgb, var(--ux-plus-notice) 45%, transparent);',
+    '}',
+    // White: the question, its answer, and the row's own title and summary.
+    ROW_CSS_SCOPE + ' :is([class*="_title"], [class*="_summary"], [class*="_question"],',
+    '  [class*="_answer"], [class*="_verdict"], [class*="_unansweredQuestion"]) {',
+    '  color: var(--dsw-alias-label-primary);',
+    '}',
+    // White tone: the secondary tier — the skipped placeholder, chevron, dot.
+    ROW_CSS_SCOPE + ' :is([class*="_skipped"], [class*="_chevron"]) {',
+    '  color: var(--dsw-alias-label-primary-dimmed);',
+    '}',
+    ROW_CSS_SCOPE + ' [class*="_sep"] {',
+    '  background: var(--dsw-alias-label-primary-dimmed);',
+    '}',
+  ].join('\n')
+}
+
+/**
+ * Install the notice-blue treatment (W-14) as one plugin-owned <style>.
+ * @returns {{ remove: () => void } | null} the release handle, or null when
+ *   there is no <head> to attach to.
+ */
+function installAccent() {
+  if (document.head === null || document.head === undefined) return null
+  const tag = document.createElement('style')
+  tag.setAttribute('data-plugin', 'dsh-ux-plus')
+  tag.setAttribute('data-feature', id)
+  tag.textContent = accentCss()
+  document.head.appendChild(tag)
+  return {
+    remove() {
+      if (tag.parentNode !== null && tag.parentNode !== undefined) tag.parentNode.removeChild(tag)
+    },
+  }
+}
+
+/**
  * Mount the client half.
  * @param {object} ctx - the client plugin context (unused: pure DOM feature).
  * @param {object} deps - shared feature deps (unused: no service needed).
@@ -59,6 +144,8 @@ export function client(ctx, deps) {
   /** W-4: disclosure rows we expanded — each element is clicked at most once. */
   const expandedByUs = new WeakSet()
   const observer = new MutationObserver(schedule)
+  // W-14: the one DOM addition of this feature — a plugin-owned <style>.
+  const accent = installAccent()
 
   /** Coalesce mutation pressure into one 0-delay scan (W-7). */
   function schedule() {
@@ -121,6 +208,8 @@ export function client(ctx, deps) {
 
   return function cleanup() {
     disposed = true
+    // W-6: off == never installed — the plugin-owned <style> goes with it.
+    if (accent !== null) accent.remove()
     if (timer !== null) window.clearTimeout(timer)
     observer.disconnect()
     // W-6: off == never installed — reverse-collapse the rows we expanded

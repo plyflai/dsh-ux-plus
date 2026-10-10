@@ -1,15 +1,16 @@
 /**
- * W-1..W-8 + W-13 unit tests for the tool-ask-question-expanded feature
+ * W-1..W-8 + W-13 + W-14 unit tests for the tool-ask-question-expanded feature
  * (plan 2026-09-19-dsh-ux-plus-tool-ask-question-expanded, v6 — plain Node,
  * no browser, no React). The fake DOM supplies exactly what the feature
- * touches: document.body, document.querySelectorAll (the ask-row selector
- * only), document.activeElement, window.setTimeout/clearTimeout,
- * window.localStorage, and a passive MutationObserver.
+ * touches: document.body, document.head, document.querySelectorAll (the
+ * ask-row selector only), document.activeElement, window.setTimeout/
+ * clearTimeout, window.localStorage, and a passive MutationObserver.
  *
  * The host's reaction to our click (the DisclosureRow toggling its own
  * aria-expanded) is simulated test-side via hostToggle; the feature itself
- * only ever dispatches click() — every assertion below is about click
- * counts, observer wiring, timers, and the W-5 zero-injection guarantees.
+ * only ever dispatches click() and installs one plugin-owned <style> (W-14) —
+ * every assertion below is about click counts, observer wiring, timers, the
+ * accent CSS, and the W-5 injection guarantees.
  */
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
@@ -98,6 +99,7 @@ function makeEnv() {
 
   env.document = {
     body: makeElement('body'),
+    head: makeElement('head'),
     activeElement: null,
     createElement: (tag) => makeElement(tag),
     querySelectorAll: (sel) => (sel.includes('ask_user_question') ? env.askRows : []),
@@ -329,32 +331,76 @@ test('W-4: an expanded element is never re-clicked; a new row element is expande
 })
 
 // ---------------------------------------------------------------------------
-// W-5 zero injection — the click is the entire surface.
+// W-5 zero injection — the click is the entire behavioral surface; the only
+// DOM addition is the plugin-owned <style> (W-14), which lives in <head>.
 // ---------------------------------------------------------------------------
 
-test('W-5: zero injection — no styles, no attributes, no nodes, no storage', async () => {
+test('W-5: zero injection — no host attributes, no body nodes, no storage', async () => {
   const env = makeEnv()
   env.installGlobals()
   try {
     const hit = makeAskRow(env, { state: 'done', expanded: 'false', expandable: true })
     const f = await import(FEATURE)
     // A Map (not Object.fromEntries): object keys survive by identity.
-    const snapshot = {
-      attrs: new Map(env.allElements.map((el) => [el, { ...el.attributes }])),
-      children: env.document.body.children.length,
-      created: env.elementCreations,
-      stored: env.window.localStorage.store.size,
-    }
+    // Snapshotted BEFORE mount, so the plugin-owned <style> created during
+    // mount is not mistaken for a host node whose attributes changed.
+    const hosts = env.allElements.slice()
+    const snapshot = new Map(hosts.map((el) => [el, { ...el.attributes }]))
+    const children = env.document.body.children.length
+    const stored = env.window.localStorage.store.size
     f.client(undefined, undefined)
     assert.equal(hit.disclosure.clicks, 1)
     env.fireObservers()
     env.flushTimers()
-    for (const el of env.allElements) {
-      assert.deepEqual(el.attributes, snapshot.attrs.get(el), `the feature wrote attributes on <${el.tagName.toLowerCase()}>`)
+    for (const el of hosts) {
+      assert.deepEqual(el.attributes, snapshot.get(el), `the feature wrote attributes on <${el.tagName.toLowerCase()}>`)
     }
-    assert.equal(env.document.body.children.length, snapshot.children, 'no node inserted or removed')
-    assert.equal(env.elementCreations, snapshot.created, 'no element created')
-    assert.equal(env.window.localStorage.store.size, 0, 'no localStorage writes')
+    assert.equal(env.document.body.children.length, children, 'no node inserted or removed in <body>')
+    assert.equal(env.window.localStorage.store.size, stored, 'no localStorage writes')
+    // The one addition: exactly one plugin-owned <style>, in <head> only.
+    const tags = env.document.head.children.filter((c) => c.tagName === 'STYLE')
+    assert.equal(tags.length, 1, 'one plugin-owned <style>')
+    assert.equal(tags[0].attributes['data-plugin'], 'dsh-ux-plus')
+    assert.equal(env.document.body.children.some((c) => c.tagName === 'STYLE'), false)
+  } finally {
+    env.uninstallGlobals()
+  }
+})
+
+// ---------------------------------------------------------------------------
+// W-14 notice-blue block — tokens, settled rows, gone at dispose.
+// ---------------------------------------------------------------------------
+
+test('W-14: settled ask rows get the notice-blue wash and white text', async () => {
+  const env = makeEnv()
+  env.installGlobals()
+  try {
+    const f = await import(FEATURE)
+    const cleanup = f.client(undefined, undefined)
+    const css = env.document.head.children.find((c) => c.tagName === 'STYLE').textContent
+    // Scope: settled rows only — a running row keeps the host shimmer.
+    assert.ok(
+      css.includes('[data-tool="ask_user_question"]:not([data-state="running"]):not([data-state="preparing"])'),
+      'the rules must be gated on settled ask rows',
+    )
+    // The blue is the design system's notice/info token, never a literal.
+    assert.ok(css.includes('--ux-plus-notice: var(--dsw-alias-button-info-fill)'))
+    // Block wash (20%) and the card riding it (14%), both from that token.
+    assert.ok(css.includes('background: color-mix(in srgb, var(--ux-plus-notice) 20%, transparent)'))
+    assert.ok(css.includes('background: color-mix(in srgb, var(--ux-plus-notice) 14%, transparent)'))
+    assert.ok(css.includes('border-color: color-mix(in srgb, var(--ux-plus-notice) 45%, transparent)'))
+    // White, and the white tone for the secondary tier.
+    assert.ok(css.includes('color: var(--dsw-alias-label-primary);'))
+    assert.ok(css.includes('color: var(--dsw-alias-label-primary-dimmed);'))
+    // The question text is the host-dim part the user could not read.
+    assert.ok(css.includes('[class*="_question"]'))
+    assert.ok(css.includes('[class*="_summary"]'))
+    // No hard-coded colors and no specificity arms race.
+    assert.equal(/#[0-9a-fA-F]{3,8}\b/.test(css), false, 'the CSS hard-codes a color literal')
+    assert.equal(/rgba?\(/.test(css), false, 'the CSS hard-codes an rgb color')
+    assert.equal(css.includes('!important'), false)
+    cleanup()
+    assert.equal(env.document.head.children.filter((c) => c.tagName === 'STYLE').length, 0, 'W-6: the <style> is removed')
   } finally {
     env.uninstallGlobals()
   }

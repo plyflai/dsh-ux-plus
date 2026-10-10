@@ -490,8 +490,17 @@ test('the D5 switch engine mounts and disposes each feature per switch value', a
       workspaces: { list: makeListStore(workspacesSnap) },
     }
     const disposeAll = mountFeatures(ctx, deps, uxScope)
+    // Styles are counted per owner: the ask-question accent (W-14) is its own
+    // lifecycle, and the typography assertions below must not absorb it.
+    const accentStyles = () =>
+      env.document.head.children.filter((c) => c.attributes['data-feature'] === 'tool-ask-question-expanded')
+    const otherStyles = () =>
+      env.document.head.children.filter(
+        (c) => c.tagName === 'STYLE' && c.attributes['data-feature'] !== 'tool-ask-question-expanded',
+      )
     assert.equal(uxScope.subscribeCount(), 1)
-    assert.equal(env.document.head.children.length, 1) // typography style
+    assert.equal(otherStyles().length, 1) // typography style
+    assert.equal(accentStyles().length, 1, 'the ask-question accent style is mounted')
     const menu = () => ctx.registrations.filter((row) => row.key === 'sidebar.workspaces.session.menu.item' && !row.retired)
     assert.equal(menu().length, 1)
     assert.equal(env.listenerCount('document', 'pointerdown'), 0)
@@ -504,14 +513,19 @@ test('the D5 switch engine mounts and disposes each feature per switch value', a
     await uxScope.set('workspace-session-menu', false)
     assert.equal(menu().length, 0, 'off removes the native menu row immediately')
     assert.ok(ctx.locales.every((row) => row.retired), 'off removes the menu locale')
-    assert.equal(env.document.head.children.length, 1, 'the other features stay on')
+    assert.equal(otherStyles().length, 1, 'the other features stay on')
     await uxScope.set('workspace-session-menu', true)
     assert.equal(menu().length, 1, 'on re-registers the native menu row immediately')
 
     await uxScope.set('conversation-typography', false)
-    assert.equal(env.document.head.children.length, 0, 'typography off removes the style tag')
+    assert.equal(otherStyles().length, 0, 'typography off removes the style tag')
     await uxScope.set('conversation-typography', true)
-    assert.equal(env.document.head.children.length, 1)
+    assert.equal(otherStyles().length, 1)
+
+    await uxScope.set('tool-ask-question-expanded', false)
+    assert.equal(accentStyles().length, 0, 'ask-question off removes the accent style')
+    await uxScope.set('tool-ask-question-expanded', true)
+    assert.equal(accentStyles().length, 1, 'ask-question on re-installs the accent style')
 
     await uxScope.set('workspace-recency-order', false)
     assert.equal(sections.b.style.order, undefined, 'teardown restored the section styles')
