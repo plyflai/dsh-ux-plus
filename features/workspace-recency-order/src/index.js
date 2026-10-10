@@ -48,13 +48,23 @@
  *     include a group-section header qualifies. The flat list and the
  *     search tree carry no such headers, so they never match — no section
  *     counting anywhere (the legacy count-and-compare finder is gone).
- *   - rows are matched to sessions by replaying the host's own row
- *     projection — recency or the saved manual order over the account's
- *     members, the current blank pinned first, then the host visibility
- *     filter (tree.ts:144-212 + WorkspaceBrowser.tsx:804-838) — and only
- *     then pairing positionally (the host exposes no id on row elements);
- *     a count mismatch or a failed pairing-trust check makes the row layer
- *     a no-op for that section (the group layer is unaffected).
+ *   - rows are matched to sessions by replaying the host's own row projection
+ *     and only then pairing positionally (the host exposes no id on row
+ *     elements). The replay mirrors the host pipeline exactly, in order:
+ *     recency or the reconciled manual order over the account's members
+ *     (tree.ts:144-200 — pins, the archive partition and fork placement
+ *     included), the current blank pinned first (tree.ts:214-220), the host
+ *     visibility filter following the user's archivedFilter
+ *     (tree.ts:229-253), then the host section partition that fronts blanks
+ *     and non-archived pinned rows (tree.ts:273-287). A count mismatch or a
+ *     failed pairing-trust check makes the row layer a no-op for that section
+ *     (the group layer is unaffected) and logs one trace line when
+ *     `dsh.ux-plus.recency.debug` is on.
+ *   - the replay is only how rows get identified. The order this feature
+ *     WRITES is recency in both sort modes, except the current blank row and
+ *     non-archived pinned rows, which keep the host's rendered positions — so
+ *     a sidebar left in 手动排序 (the host flips to it silently on the first
+ *     row drag, stores.ts:104) still surfaces the conversation you are in.
  *
  * Route 1 (pure CSS): the tree and every section become flex columns and
  * each child receives a computed `order` (group rank 0..n-1; row rank 10+;
@@ -83,6 +93,33 @@ const VIEW_STORE_KEY = 'dsh.workspace.view.v5'
 
 /** The host's ungrouped-bucket account key (ui-workspace tree.ts:21). */
 const UNGROUPED_KEY = ''
+
+/**
+ * Row-layer bail-out trace. Off by default (zero console noise); flip with
+ * `localStorage.setItem('dsh.ux-plus.recency.debug', '1')` then reload. Each
+ * distinct (account, reason, detail) prints once, so a persisting bail-out
+ * stays diagnosable without streaming. This exists because the row layer's
+ * fail-closed path used to be invisible: a drifted host replay simply meant
+ * "the plugin does nothing", indistinguishable from the plugin being disabled.
+ */
+const TRACE_KEY = 'dsh.ux-plus.recency.debug'
+const traceSeen = new Set()
+
+function traceSkip(account, reason, detail) {
+  let on = false
+  try {
+    on = window.localStorage.getItem(TRACE_KEY) === '1'
+  } catch {
+    return
+  }
+  if (!on) return
+  const signature = `${account}|${reason}|${detail}`
+  if (traceSeen.has(signature)) return
+  // Bounded: a long-lived session with churning accounts forgets old lines.
+  if (traceSeen.size > 200) traceSeen.clear()
+  traceSeen.add(signature)
+  console.debug(`[ux-plus:recency] row layer off for "${account || 'ungrouped'}": ${reason} (${detail})`)
+}
 
 /** Host Windows-path normalization (tree.ts:513-517). */
 function folderPath(path) {
@@ -132,14 +169,20 @@ function latestSessionUpdate(workspace, byId) {
 }
 
 /**
- * Host row visibility (tree.ts:208-212): subagent and archived sessions never
- * render; a blank row renders only while it is the current session.
+ * Host row visibility (tree.ts:229-253 `sessionVisible`): subagent sessions
+ * never render; a blank row renders only while it is the current session;
+ * archived rows follow the user's archived filter — 'default' hides them,
+ * 'show' mixes them into their kept slots, 'only' restricts the list to them.
+ * The filter is an input, not a constant: hard-coding 'default' made this
+ * replay disagree with the host the moment the sidebar was set to show
+ * archives, and the row layer then failed its count check and no-op'd.
  */
-function rowVisible(session, id, currentId, archived) {
-  return session !== undefined
-    && session.origin !== 'subagent'
-    && !archived.has(id)
-    && (session.blank !== true || id === currentId)
+function rowVisible(session, id, currentId, archived, archivedFilter) {
+  if (session === undefined || session.origin === 'subagent') return false
+  if (session.blank === true && id !== currentId) return false
+  if (archivedFilter === 'show') return true
+  if (archivedFilter === 'only') return archived.has(id)
+  return !archived.has(id)
 }
 
 /**
@@ -161,11 +204,15 @@ function orderByRecency(memberIds, byId) {
 }
 
 /**
- * Host manual-order reconciliation (tree.ts:166-186): retained saved slots
- * first, remaining known members appended by recency; departed and unknown
- * members omitted.
+ * Host manual-order reconciliation (tree.ts:166-200), ported exactly: retained
+ * saved slots first, then non-archived pinned members, then the remaining
+ * known members by recency, then archived members last; a new fork is spliced
+ * in front of its parent. `rowState` carries the registry-global pin and
+ * archive sets — omitting them (the historical 3-argument shape) made this
+ * replay drop the pin block and the archive partition, so its result no longer
+ * matched what the host renders and the row layer silently stopped pairing.
  */
-function reconcileManualOrder(memberIds, savedOrder, byId) {
+function reconcileManualOrder(memberIds, savedOrder, byId, rowState) {
   const members = new Map(memberIds.map((id) => [id, id]))
   const included = new Set()
   const ordered = []
@@ -175,12 +222,54 @@ function reconcileManualOrder(memberIds, savedOrder, byId) {
     ordered.push(id)
     included.add(key)
   }
-  for (const id of orderByRecency(memberIds, byId)) {
-    if (included.has(id)) continue
-    ordered.push(id)
+  const archived = new Set(rowState && rowState.archived ? rowState.archived : [])
+  const pins = []
+  for (const sessionId of (rowState && rowState.pinned ? rowState.pinned : [])) {
+    const id = members.get(sessionId)
+    if (id === undefined || included.has(id) || archived.has(id) || byId[id] === undefined) continue
+    pins.push(id)
     included.add(id)
   }
-  return ordered
+  const ordinary = []
+  const archives = []
+  for (const id of orderByRecency(memberIds.filter((id) => !included.has(id)), byId)) {
+    if (archived.has(id)) archives.push(id)
+    else ordinary.push(id)
+  }
+  const result = [...pins, ...ordered, ...ordinary, ...archives]
+  const pending = new Set(ordinary)
+  const placeFork = (id) => {
+    if (!pending.delete(id)) return
+    const parentId = byId[id] && byId[id].parentId
+    if (parentId === undefined || parentId === id || !result.includes(parentId)) return
+    placeFork(parentId)
+    result.splice(result.indexOf(id), 1)
+    result.splice(result.indexOf(parentId), 0, id)
+  }
+  for (const id of [...ordinary].reverse()) placeFork(id)
+  return result
+}
+
+/**
+ * Host section partition (tree.ts:273-287 `sectionMembers`), applied AFTER the
+ * order projection and the visibility filter: blank placeholders first, then
+ * non-archived pinned rows, then the rest in the projected order. The host
+ * runs it on every group and flat list, so a section holding a pinned session
+ * renders that session ahead of the projected order — replaying without it
+ * pairs DOM rows against the wrong sessions.
+ */
+function sectionPartition(ids, data) {
+  const placeholders = []
+  const leading = []
+  const rest = []
+  for (const id of ids) {
+    const session = data.byId[id]
+    if (session === undefined) continue
+    if (session.blank === true) placeholders.push(id)
+    else if (!data.archived.has(id) && data.pinned.has(id)) leading.push(id)
+    else rest.push(id)
+  }
+  return [...placeholders, ...leading, ...rest]
 }
 
 /**
@@ -214,11 +303,17 @@ function readViewStore() {
 
 function viewOrdering() {
   const state = readViewStore()
-  if (state === null || state.orderBy !== 'manual') return { orderBy: 'updated', saved: undefined }
+  // The host's own default when the key is absent or unreadable.
+  const archivedFilter = state !== null
+    && (state.archivedFilter === 'show' || state.archivedFilter === 'only')
+    ? state.archivedFilter
+    : 'default'
+  if (state === null || state.orderBy !== 'manual') return { orderBy: 'updated', saved: undefined, archivedFilter }
   const saved = state.sessionOrderByAccount
   return {
     orderBy: 'manual',
     saved: saved !== null && typeof saved === 'object' ? saved : undefined,
+    archivedFilter,
   }
 }
 
@@ -234,14 +329,18 @@ function viewOrdering() {
 function renderedOrder(memberIds, key, data, view) {
   const byId = data.byId
   const base = view.orderBy === 'manual'
-    ? reconcileManualOrder(memberIds, view.saved ? view.saved[key] : undefined, byId)
+    ? reconcileManualOrder(memberIds, view.saved ? view.saved[key] : undefined, byId,
+      { pinned: data.pinned, archived: data.archived })
     : orderByRecency(memberIds, byId)
   const currentBlank = data.currentId !== undefined && memberIds.includes(data.currentId)
     && byId[data.currentId] !== undefined && byId[data.currentId].blank === true
     ? data.currentId
     : undefined
-  return pinCurrentBlank(base, currentBlank)
-    .filter((id) => rowVisible(byId[id], id, data.currentId, data.archived))
+  return sectionPartition(
+    pinCurrentBlank(base, currentBlank)
+      .filter((id) => rowVisible(byId[id], id, data.currentId, data.archived, view.archivedFilter)),
+    data,
+  )
 }
 
 /**
@@ -277,20 +376,29 @@ function collapsedRows(ids, byId) {
  * match), so one title prefixing another row's text cannot cross-align.
  */
 function pairingTrustworthy(rows, shown, byId) {
+  return firstUnpairedRow(rows, shown, byId) === -1
+}
+
+/**
+ * Index of the first paired row that does not confirm its session, or -1 when
+ * every pairing is confirmed. Same rule `pairingTrustworthy` documents; the
+ * index exists so a bail-out can say where it broke instead of saying nothing.
+ */
+function firstUnpairedRow(rows, shown, byId) {
   for (let i = 0; i < shown.length; i += 1) {
     const session = byId[shown[i]]
-    if (session === undefined) return false
+    if (session === undefined) return i
     if (session.blank === true) {
-      if (i !== 0) return false
+      if (i !== 0) return i
       continue
     }
     const title = session.displayTitle
-    if (typeof title !== 'string' || title === '') return false
+    if (typeof title !== 'string' || title === '') return i
     const target = normalizeText(title)
-    if (target === '') return false
-    if (!rowCarriesTitle(rows[i], target)) return false
+    if (target === '') return i
+    if (!rowCarriesTitle(rows[i], target)) return i
   }
-  return true
+  return -1
 }
 
 /**
@@ -467,25 +575,44 @@ function childrenOf(workspace, data) {
  * Rows are paired after replaying the host's actual row projection (the
  * derived order, not the model's member order — `renderedOrder`) and the host
  * collapse rule; a count mismatch or a failed pairing-trust check makes this
- * section's row layer a no-op (the group layer is unaffected).
+ * section's row layer a no-op (the group layer is unaffected). A bail-out is
+ * logged once per distinct reason (`traceSkip`) — silently doing nothing is
+ * what let a drifted host replay pass unnoticed in production.
  *
- * The section's current blank row keeps the host's first row position
- * (pinCurrentBlank invariant — tree.ts:194-200, member guard
- * WBS:823-826); only the remaining rows are re-ranked by recency, so the
- * feature never drags the pinned blank out of position 0.
+ * Two row classes keep the host's rendered positions instead of being
+ * re-ranked: the current blank row (host pinCurrentBlank invariant,
+ * tree.ts:214-220) and non-archived pinned rows (host sectionMembers fronts
+ * them, tree.ts:273-287). Re-ranking a pin would fight an explicit user
+ * action; everything else is ranked by recency, in both sort modes — that is
+ * what this feature promises, and it is why a sidebar left in 手动排序 no
+ * longer freezes stale positions.
  */
 function orderRows(section, account, data, view) {
   const expected = renderedOrder(account.memberIds, account.key, data, view)
   const shown = sectionCollapsed(section) ? collapsedRows(expected, data.byId) : expected
   const rows = rowChildren(section)
-  if (rows.length !== shown.length) return
-  if (!pairingTrustworthy(rows, shown, data.byId)) return
+  if (rows.length !== shown.length) {
+    traceSkip(account.key, 'count', `dom ${rows.length} vs replay ${shown.length}`)
+    return
+  }
+  const unpaired = firstUnpairedRow(rows, shown, data.byId)
+  if (unpaired !== -1) {
+    traceSkip(account.key, 'pairing', `row ${unpaired} of ${shown.length}`)
+    return
+  }
   const entries = shown.map((id, index) => ({ session: data.byId[id], element: rows[index] }))
-  const pinned = entries.length > 0 && entries[0].session.blank === true ? [entries[0]] : []
-  const ranked = entries.slice(pinned.length)
+  const leading = []
+  const ranked = []
+  entries.forEach((entry, index) => {
+    const blankFront = index === 0 && entry.session.blank === true
+    const pinnedFront = !blankFront && !data.archived.has(entry.session.id)
+      && data.pinned.has(entry.session.id)
+    if (blankFront || pinnedFront) leading.push(entry)
+    else ranked.push(entry)
+  })
   ranked.sort((a, b) => b.session.updatedAt - a.session.updatedAt
     || (a.session.id < b.session.id ? -1 : a.session.id > b.session.id ? 1 : 0))
-  pinned.concat(ranked).forEach((entry, rank) => {
+  leading.concat(ranked).forEach((entry, rank) => {
     data.styles.write(entry.element, 'order', String(10 + rank))
     data.styles.write(entry.element, 'flexShrink', '0')
   })
@@ -645,6 +772,11 @@ export function client(ctx, deps) {
     const byId = sessionSnapshot.byId
     const items = workspaceSnapshot.items
     const archived = new Set(workspaceSnapshot.archivedSessionIds)
+    // Registry-global pin set, same snapshot as the archive set
+    // (workspace/src/index.ts:731-738; the host reads the very same triple in
+    // client/navigation.ts:254). Pinned rows lead their section, so the row
+    // replay needs them to pair against what the host renders.
+    const pinned = new Set(workspaceSnapshot.pinnedSessionIds ?? [])
     // Mirror the host's current-session lookup (WorkspaceBrowser.tsx:804-808,
     // mainSessionId; the panelActive `current` at :220-224 only drives
     // auto-expand and highlight, never row existence).
@@ -655,7 +787,7 @@ export function client(ctx, deps) {
         break
       }
     }
-    return { byId, items, archived, currentId, styles }
+    return { byId, items, archived, pinned, currentId, styles }
   }
 
   /**

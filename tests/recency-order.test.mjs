@@ -248,7 +248,7 @@ function buildTree(env, sectionSpecs) {
 // Mount helper: fake DOM + list stores + the real feature client.
 // ---------------------------------------------------------------------------
 
-async function mount({ sections, sessions, workspaces, storage, archived = [] }) {
+async function mount({ sections, sessions, workspaces, storage, archived = [], pinned = [] }) {
   const env = makeEnv()
   installGlobals(env)
   const built = buildTree(env, sections)
@@ -267,6 +267,7 @@ async function mount({ sections, sessions, workspaces, storage, archived = [] })
     phase: 'ready',
     items: workspaces,
     archivedSessionIds: archived,
+    pinnedSessionIds: pinned,
   })
   const { feature } = await import(new URL('features/workspace-recency-order/src/index.js', root).href)
   const dispose = feature.client({}, {
@@ -1035,4 +1036,107 @@ test('archiving a stray conversation does not move the ungrouped bucket', async 
   assert.deepEqual(open.map((entry) => entry.group), ['1', '0'], 'the bucket (500) outranks A (100)')
   assert.deepEqual(archived.map((entry) => entry.group), ['1', '0'],
     'archiving the stray session leaves the bucket where it was')
+})
+
+test('a pinned session keeps the host front position while the rest is ranked', async () => {
+  // Host section partition (tree.ts:273-287): blanks, then non-archived
+  // pinned rows, then the projected rest — so the DOM really renders the
+  // OLDEST session first. Replaying without that partition pairs the rows
+  // against the wrong sessions and the row layer silently writes nothing.
+  const { rows, tearDown } = await mount({
+    sections: [{ title: 'w1', rows: ['b1', 'b2', 'b3'].map((id) => ({ id, text: rowText(id) })) }],
+    sessions: BETA_SESSIONS,
+    workspaces: BETA_WORKSPACES,
+    pinned: ['b1'],
+  })
+  try {
+    assert.equal(rows.b1.style.order, '10', 'the pinned row keeps the host front position')
+    assert.equal(rows.b2.style.order, '11', 'the rest is still ranked by recency')
+    assert.equal(rows.b3.style.order, '12')
+  } finally {
+    tearDown()
+  }
+})
+
+test('archivedFilter show: archived rows are rendered, so the row layer still applies', async () => {
+  // The host mixes archived sessions back into the list (grayed) when the
+  // user picks 全部对话 (tree.ts:229-253). Hard-coding the 'default' filter
+  // dropped them from the replay: DOM 3 rows vs replay 2 → count mismatch →
+  // no order written at all.
+  const { rows, tearDown } = await mount({
+    sections: [{ title: 'w1', rows: ['b2', 'b3', 'b1'].map((id) => ({ id, text: rowText(id) })) }],
+    sessions: BETA_SESSIONS,
+    workspaces: BETA_WORKSPACES,
+    archived: ['b2'],
+    storage: {
+      'dsh.workspace.view.v5': JSON.stringify({
+        groupBy: 'workspace',
+        orderBy: 'updated',
+        groupExpansion: {},
+        sessionOrderByAccount: {},
+        archivedFilter: 'show',
+      }),
+    },
+  })
+  try {
+    assert.equal(rows.b2.style.order, '10', 'the visible archived row is paired and ranked')
+    assert.equal(rows.b3.style.order, '11')
+    assert.equal(rows.b1.style.order, '12')
+  } finally {
+    tearDown()
+  }
+})
+
+test('archivedFilter only: the archived-only list is still ranked', async () => {
+  // 仅显示已归档 renders nothing but archived rows; the replay must shrink to
+  // the same set or the section bails out on a count mismatch.
+  const { rows, tearDown } = await mount({
+    sections: [{ title: 'w1', rows: [{ id: 'b2', text: rowText('b2') }] }],
+    sessions: BETA_SESSIONS,
+    workspaces: BETA_WORKSPACES,
+    archived: ['b2'],
+    storage: {
+      'dsh.workspace.view.v5': JSON.stringify({
+        groupBy: 'workspace',
+        orderBy: 'updated',
+        groupExpansion: {},
+        sessionOrderByAccount: {},
+        archivedFilter: 'only',
+      }),
+    },
+  })
+  try {
+    assert.equal(rows.b2.style.order, '10')
+  } finally {
+    tearDown()
+  }
+})
+
+test('manual mode: a stale saved order and a pinned row are both replayed, then ranked', async () => {
+  // The host's manual projection (tree.ts:166-200) is saved slots → pins →
+  // ordinary by recency → archives last, and the section partition then
+  // front-loads the pin — so the DOM really renders [b2, b3, b1] even though
+  // the saved permutation never mentions b2. The row layer must pair against
+  // THAT order and still rank by activity (the pinned row excepted).
+  const { rows, tearDown } = await mount({
+    sections: [{ title: 'w1', rows: ['b2', 'b3', 'b1'].map((id) => ({ id, text: rowText(id) })) }],
+    sessions: BETA_SESSIONS,
+    workspaces: BETA_WORKSPACES,
+    pinned: ['b2'],
+    storage: {
+      'dsh.workspace.view.v5': JSON.stringify({
+        groupBy: 'workspace',
+        orderBy: 'manual',
+        groupExpansion: {},
+        sessionOrderByAccount: { w1: ['b3', 'b1'] },
+      }),
+    },
+  })
+  try {
+    assert.equal(rows.b2.style.order, '10', 'the pin keeps the host front position')
+    assert.equal(rows.b3.style.order, '11', 'recency beats the stale saved permutation')
+    assert.equal(rows.b1.style.order, '12')
+  } finally {
+    tearDown()
+  }
 })
