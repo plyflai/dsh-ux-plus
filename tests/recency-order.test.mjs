@@ -248,7 +248,9 @@ function buildTree(env, sectionSpecs) {
 // Mount helper: fake DOM + list stores + the real feature client.
 // ---------------------------------------------------------------------------
 
-async function mount({ sections, sessions, workspaces, storage, archived = [], pinned = [] }) {
+async function mount({
+  sections, sessions, workspaces, storage, archived = [], pinned = [], projections = {},
+}) {
   const env = makeEnv()
   installGlobals(env)
   const built = buildTree(env, sections)
@@ -262,6 +264,9 @@ async function mount({ sections, sessions, workspaces, storage, archived = [], p
     phase: 'ready',
     byId: Object.fromEntries(sessions.map((s) => [s.id, s])),
     ids: sessions.map((s) => s.id),
+    // Subagent catalogs travel with the same list snapshot (the host's
+    // running-subagent exemption reads them, tree.ts:390-395).
+    projectionsBySession: projections,
   })
   const workspacesStore = makeListStore({
     phase: 'ready',
@@ -1136,6 +1141,189 @@ test('manual mode: a stale saved order and a pinned row are both replayed, then 
     assert.equal(rows.b2.style.order, '10', 'the pin keeps the host front position')
     assert.equal(rows.b3.style.order, '11', 'recency beats the stale saved permutation')
     assert.equal(rows.b1.style.order, '12')
+  } finally {
+    tearDown()
+  }
+})
+
+// ---------------------------------------------------------------------------
+// The collapsed-slice contract (host rows/WorkspaceBrowser.tsx:55-70): blank,
+// RUNNING and running-subagent rows are exempt from the idle quota, and the
+// quota itself is per-group React state — 5, +5 per 展开更多 click, Infinity
+// once nothing is hidden (WorkspaceBrowser.tsx:300/369/419-433/581-601).
+//
+// A port that exempted blanks only and hardcoded 5 replayed one row short on
+// every narrowed section holding a running conversation, tripped the count
+// gate, and left that section's row layer off — so the running session stayed
+// below a stale one, which is exactly what this feature exists to prevent.
+// ---------------------------------------------------------------------------
+
+/** A running session (host SessionNode.running, tree.ts:397-417). */
+function runningSession(id, displayTitle, updatedAt) {
+  return session(id, displayTitle, updatedAt, { running: true })
+}
+
+const RUN_SESSIONS = [
+  runningSession('run', 'Run one', 900),
+  session('a1', 'A one', 100),
+  session('a2', 'A two', 200),
+  session('a3', 'A three', 300),
+  session('a4', 'A four', 400),
+  session('a5', 'A five', 500),
+  session('a6', 'A six', 600),
+]
+const RUN_WORKSPACES = [{
+  workspaceId: 'w1',
+  path: '/w1',
+  title: 'w1',
+  sessionIds: ['run', 'a1', 'a2', 'a3', 'a4', 'a5', 'a6'],
+}]
+const RUN_TEXT = {
+  run: 'Run one1分钟',
+  a1: 'A one1分钟',
+  a2: 'A two1分钟',
+  a3: 'A three1分钟',
+  a4: 'A four1分钟',
+  a5: 'A five1分钟',
+  a6: 'A six1分钟',
+}
+function runRows(ids) {
+  return ids.map((id) => ({ id, text: RUN_TEXT[id] }))
+}
+
+test('a collapsed section exempts the running row, then ranks it to the top', async () => {
+  // The reported shape: the host renders six rows (1 running + 5 idle) taken
+  // from a stale 手动排序 saved order, so the running conversation sits BELOW
+  // an old one. The replay must slice to the very same six rows and then rank
+  // them by activity — the running row takes the first position.
+  const { rows, sections, button, tearDown } = await mount({
+    sections: [{
+      title: 'w1',
+      rows: runRows(['a6', 'run', 'a5', 'a4', 'a3', 'a2']),
+      button: 'collapsed',
+    }],
+    sessions: RUN_SESSIONS,
+    workspaces: RUN_WORKSPACES,
+    storage: {
+      'dsh.workspace.view.v5': JSON.stringify({
+        groupBy: 'workspace',
+        orderBy: 'manual',
+        groupExpansion: {},
+        sessionOrderByAccount: { w1: ['a6', 'run', 'a5', 'a4', 'a3', 'a2', 'a1'] },
+      }),
+    },
+  })
+  try {
+    assert.equal(rows.run.style.order, '10', 'the running session is lifted over the stale lead')
+    assert.equal(rows.a6.style.order, '11', 'the stale row drops below it')
+    assert.equal(rows.a5.style.order, '12')
+    assert.equal(rows.a2.style.order, '15')
+    assert.equal(button.style.order, '999', 'the overflow button stays last')
+    assert.equal(sections[0].section.style.order, '0', 'the group layer is unaffected')
+  } finally {
+    tearDown()
+  }
+})
+
+test('a parent with a running subagent is exempt from the idle quota too', async () => {
+  // Host runningChildCount (tree.ts:390-395) reads the subagentCatalog
+  // projection values, so a parent whose child is still running is rendered
+  // outside the quota even though the parent row itself is idle.
+  const sessions = [
+    session('p1', 'Parent one', 700),
+    session('sub1', 'Sub one', 0, {
+      origin: 'subagent', parentId: 'p1', running: true, blank: false,
+    }),
+    session('a1', 'A one', 100),
+    session('a2', 'A two', 200),
+    session('a3', 'A three', 300),
+    session('a4', 'A four', 400),
+    session('a5', 'A five', 500),
+    session('a6', 'A six', 600),
+  ]
+  const text = {
+    p1: 'Parent one1分钟',
+    a1: 'A one1分钟',
+    a2: 'A two1分钟',
+    a3: 'A three1分钟',
+    a4: 'A four1分钟',
+    a5: 'A five1分钟',
+    a6: 'A six1分钟',
+  }
+  const { rows, tearDown } = await mount({
+    sections: [{
+      title: 'w1',
+      rows: ['p1', 'a6', 'a5', 'a4', 'a3', 'a2'].map((id) => ({ id, text: text[id] })),
+      button: 'collapsed',
+    }],
+    sessions,
+    workspaces: [{
+      workspaceId: 'w1',
+      path: '/w1',
+      title: 'w1',
+      sessionIds: ['p1', 'a1', 'a2', 'a3', 'a4', 'a5', 'a6'],
+    }],
+    projections: { p1: { values: { subagentCatalog: [{ id: 'sub1' }] } } },
+  })
+  try {
+    assert.equal(rows.p1.style.order, '10', 'the running-subagent parent is rendered and ranked')
+    assert.equal(rows.a6.style.order, '11')
+    assert.equal(rows.a2.style.order, '15')
+  } finally {
+    tearDown()
+  }
+})
+
+test('a section the user expanded (quota 10) keeps working', async () => {
+  // One 展开更多 click raises the group's quota to 10, so the host renders 11
+  // rows (1 running + 10 idle). The replay derives that quota from the DOM
+  // instead of assuming the collapsed default.
+  const sessions = [runningSession('run', 'Run one', 5000)]
+  const text = { run: 'Run one1分钟' }
+  const memberIds = ['run']
+  for (let i = 1; i <= 12; i += 1) {
+    sessions.push(session(`a${i}`, `A ${i}`, i * 100))
+    text[`a${i}`] = `A ${i}1分钟`
+    memberIds.push(`a${i}`)
+  }
+  const shown = ['run']
+  for (let i = 12; i >= 3; i -= 1) shown.push(`a${i}`)
+  const { rows, tearDown } = await mount({
+    sections: [{
+      title: 'w1',
+      rows: shown.map((id) => ({ id, text: text[id] })),
+      button: 'collapsed',
+    }],
+    sessions,
+    workspaces: [{ workspaceId: 'w1', path: '/w1', title: 'w1', sessionIds: memberIds }],
+  })
+  try {
+    assert.equal(rows.run.style.order, '10')
+    assert.equal(rows.a12.style.order, '11')
+    assert.equal(rows.a3.style.order, '20')
+  } finally {
+    tearDown()
+  }
+})
+
+test('a rendered count no host quota explains still fails closed', async () => {
+  // 1 running + 4 idle is not the host's 1 running + 5·n idle shape: the
+  // count is drift, not a quota, so the section's row layer must write no
+  // order at all instead of guessing a slice (presentation never guesses).
+  const { rows, sections, tearDown } = await mount({
+    sections: [{
+      title: 'w1',
+      rows: runRows(['run', 'a6', 'a5', 'a4', 'a3']),
+      button: 'collapsed',
+    }],
+    sessions: RUN_SESSIONS,
+    workspaces: RUN_WORKSPACES,
+  })
+  try {
+    assert.equal(sections[0].section.style.order, '0', 'the group layer still applies')
+    assert.equal(rows.run.style.order, undefined)
+    assert.equal(rows.a6.style.order, undefined)
+    assert.equal(rows.a3.style.order, undefined)
   } finally {
     tearDown()
   }

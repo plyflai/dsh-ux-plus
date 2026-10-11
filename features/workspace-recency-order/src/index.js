@@ -344,12 +344,80 @@ function renderedOrder(memberIds, key, data, view) {
 }
 
 /**
- * Host collapsed-row rule (rows/WorkspaceBrowser.tsx:47-59): every blank row
- * plus the first five ordinary rows, by rendered position.
+ * Host row-exemption rule (rows/WorkspaceBrowser.tsx:55-70): a row is exempt
+ * from the collapsed idle quota when it is blank, running, or a parent with a
+ * running subagent. Only idle rows count against the quota, so a collapsed
+ * section renders more than COLLAPSED_SESSION_LIMIT rows whenever it holds a
+ * running conversation (1 running + 5 idle is the common shape) — the exact
+ * case where a blank-only port replays a shorter slice, trips the count gate
+ * and leaves the section's row layer silently off (stale row on top, running
+ * session below it).
  */
-function collapsedRows(ids, byId) {
-  let ordinary = 0
-  return ids.filter((id) => byId[id].blank || ordinary++ < COLLAPSED_SESSION_LIMIT)
+function rowExempt(session, id, data) {
+  return Boolean(session.blank) || Boolean(session.running) || runningChildCount(data, id) > 0
+}
+
+/**
+ * The host's running-subagent count for one parent row (tree.ts:390-395):
+ * the session's `subagentCatalog` projection values, counting children whose
+ * live row reports running. The host reads the ui-session status store first
+ * and falls back to the list row; this feature owns no statuses service, so
+ * it reads the same fallback (`byId[childId].running`). A divergence only
+ * lowers the exemption count, which the count gate then fails closed on — it
+ * can never paint a wrong order.
+ */
+function runningChildCount(data, parentId) {
+  const projections = data.projectionsBySession
+  const catalog = projections !== undefined && projections !== null
+    ? projections[parentId]?.values?.subagentCatalog
+    : undefined
+  if (!Array.isArray(catalog)) return 0
+  let count = 0
+  for (const child of catalog) {
+    const row = data.byId[child.id]
+    if (row !== undefined && row.running === true) count += 1
+  }
+  return count
+}
+
+/**
+ * The host's collapsed slice (rows/WorkspaceBrowser.tsx:55-70) over the
+ * replayed row order: every exempt row keeps its rendered position, and only
+ * the first `limit` idle rows survive. `limit` is the host's PER-GROUP React
+ * state — 5, then +5 per "展开更多" click, Infinity once nothing is hidden
+ * (WorkspaceBrowser.tsx:300/581-601) — so callers must not assume the 5
+ * default; collapsedShown derives the live quota from the DOM.
+ */
+function collapsedRows(ids, data, limit = COLLAPSED_SESSION_LIMIT) {
+  let idle = 0
+  return ids.filter((id) => {
+    if (rowExempt(data.byId[id], id, data)) return true
+    if (idle >= limit) return false
+    idle += 1
+    return true
+  })
+}
+
+/**
+ * The slice the host actually rendered, given the row count the DOM shows.
+ *
+ * A truncated section renders `totalExempt + limit` rows, so the live quota
+ * is derivable: `limit = domCount - exempt`. The host only ever uses 5, 10,
+ * 15… (the +5 step) or the whole list, so a count that does not land on a
+ * multiple of COLLAPSED_SESSION_LIMIT is drift, not a quota — the default is
+ * handed to the count gate, which fails closed instead of guessing.
+ *
+ * @returns {string[] | null} the slice, or null when the whole group is
+ * folded (no rows rendered while the replay expects rows).
+ */
+function collapsedShown(expected, data, domCount) {
+  if (domCount >= expected.length) return expected
+  if (domCount === 0) return null
+  const exempt = expected.filter((id) => rowExempt(data.byId[id], id, data)).length
+  const limit = domCount - exempt
+  return collapsedRows(expected, data, limit > 0 && limit % COLLAPSED_SESSION_LIMIT === 0
+    ? limit
+    : COLLAPSED_SESSION_LIMIT)
 }
 
 /**
@@ -579,6 +647,14 @@ function childrenOf(workspace, data) {
  * logged once per distinct reason (`traceSkip`) — silently doing nothing is
  * what let a drifted host replay pass unnoticed in production.
  *
+ * The collapse replay is part of that contract: the rendered slice exempts
+ * blank, running and running-subagent rows from the idle quota (rowExempt)
+ * and uses the group's live quota derived from the DOM (collapsedShown). A
+ * blank-only fixed-5 port matched only idle sections; on a section with a
+ * running session it replayed one row short, tripped the count gate and left
+ * the whole row layer off — the running conversation stayed below a stale
+ * one, which is precisely what this feature exists to prevent.
+ *
  * Two row classes keep the host's rendered positions instead of being
  * re-ranked: the current blank row (host pinCurrentBlank invariant,
  * tree.ts:214-220) and non-archived pinned rows (host sectionMembers fronts
@@ -589,8 +665,11 @@ function childrenOf(workspace, data) {
  */
 function orderRows(section, account, data, view) {
   const expected = renderedOrder(account.memberIds, account.key, data, view)
-  const shown = sectionCollapsed(section) ? collapsedRows(expected, data.byId) : expected
   const rows = rowChildren(section)
+  const shown = sectionCollapsed(section) ? collapsedShown(expected, data, rows.length) : expected
+  // A folded group renders no rows at all: there is nothing to order, and a
+  // count trace here would be noise (the group layer still runs).
+  if (shown === null) return
   if (rows.length !== shown.length) {
     traceSkip(account.key, 'count', `dom ${rows.length} vs replay ${shown.length}`)
     return
@@ -787,7 +866,18 @@ export function client(ctx, deps) {
         break
       }
     }
-    return { byId, items, archived, pinned, currentId, styles }
+    return {
+      byId,
+      items,
+      archived,
+      pinned,
+      currentId,
+      // Subagent catalogs: the host's running-subagent exemption reads them
+      // through the same list snapshot (tree.ts:390-395), so the row replay
+      // can mirror it without a statuses service.
+      projectionsBySession: sessionSnapshot.projectionsBySession,
+      styles,
+    }
   }
 
   /**
