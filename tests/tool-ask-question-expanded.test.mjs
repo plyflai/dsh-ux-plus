@@ -387,15 +387,19 @@ test('W-14: settled ask rows get the notice-blue wash and white text', async () 
     )
     // The blue is the design system's notice/info token, never a literal.
     assert.ok(css.includes('--ux-plus-notice: var(--dsw-alias-button-info-fill)'))
-    // Block wash (20%) and the card riding it (14%), both from that token.
-    assert.ok(css.includes('background: color-mix(in srgb, var(--ux-plus-notice) 20%, transparent)'))
+    // One blue layer only: the card wash (14%) + border (45%) from that token,
+    // and no outer row wash (the 20% block background is gone).
+    assert.equal(css.includes('var(--ux-plus-notice) 20%'), false, 'the outer row wash must be removed')
     assert.ok(css.includes('background: color-mix(in srgb, var(--ux-plus-notice) 14%, transparent)'))
     assert.ok(css.includes('border-color: color-mix(in srgb, var(--ux-plus-notice) 45%, transparent)'))
-    // White, and the white tone for the secondary tier.
+    // White: answer/verdict/chrome; white tone for the skipped/chevron tier.
     assert.ok(css.includes('color: var(--dsw-alias-label-primary);'))
     assert.ok(css.includes('color: var(--dsw-alias-label-primary-dimmed);'))
-    // The question text is the host-dim part the user could not read.
+    // The question recedes: grayer tier, slightly smaller font.
     assert.ok(css.includes('[class*="_question"]'))
+    assert.ok(css.includes('[class*="_unansweredQuestion"]'))
+    assert.ok(css.includes('color: var(--dsw-alias-label-secondary);'))
+    assert.ok(css.includes('font-size: calc(var(--dsh-content-font-size, 14px) - 1px)'))
     assert.ok(css.includes('[class*="_summary"]'))
     // No hard-coded colors and no specificity arms race.
     assert.equal(/#[0-9a-fA-F]{3,8}\b/.test(css), false, 'the CSS hard-codes a color literal')

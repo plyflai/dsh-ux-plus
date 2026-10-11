@@ -38,14 +38,15 @@
  *     (input/textarea/contenteditable) still in the tree, focus goes back.
  *   - Group layer: NOT done (W-11) — the host's compact-mode "N tool calls"
  *     group stays host-native (its collapse markup is untouched by design).
- *   - W-14 notice-blue block: a settled ask row gets a notice-blue wash and
- *     white/white-tone text instead of the host's monochrome tool-row chrome
- *     (see `accentCss`). Tokens only — `--dsw-alias-button-info-fill` is the
- *     design system's info/notice blue and the two label tiers flip with the
- *     theme, so the block reads white-on-blue in dark and near-black on a
- *     light-blue wash in light. Every ask row gets the wash — the question
- *     waiting for an answer included; only the text recolor is skipped on
- *     running/preparing rows so the host shimmer keeps animating.
+ *   - W-14 notice-blue block: the settled ask row's transcript CARD gets a
+ *     notice-blue wash (the single blue layer — the row itself stays
+ *     host-native, no outer wash), with the answer in white and the original
+ *     question in a smaller, grayer tier (see `accentCss`). Tokens only —
+ *     `--dsw-alias-button-info-fill` is the design system's info/notice blue
+ *     and the label tiers flip with the theme, so the block reads white on a
+ *     blue wash in dark and near-black on a light-blue wash in light. Only the
+ *     text recolor is skipped on running/preparing rows so the host shimmer
+ *     keeps animating.
  */
 
 export const id = 'tool-ask-question-expanded'
@@ -75,9 +76,11 @@ const ROW_CSS_SCOPE = ROW_SELECTOR +
  * the dimmed label tiers, so a settled question reads as one gray smear.
  *
  * Tokens, not colors: `--dsw-alias-button-info-fill` is the design system's
- * info/notice blue (design-platform.css:201/316, per theme), and the two label
- * tiers are white in the dark theme and near-black in the light one, so the
- * block stays legible in both instead of hard-coding white-on-blue.
+ * info/notice blue (design-platform.css:201/316, per theme), and the label
+ * tiers flip with the theme (white / near-black for primary, grayer steps for
+ * secondary), so the block stays legible in both instead of hard-coding
+ * white-on-blue. The answer sits on the primary tier; the original question
+ * recedes to the secondary tier at a slightly smaller font size.
  *
  * The card's own classes are CSS-module hashes, so the rules reach them
  * through `[class*="_name"]` — the same handle the typography feature uses for
@@ -88,23 +91,25 @@ const ROW_CSS_SCOPE = ROW_SELECTOR +
  */
 function accentCss() {
   return [
-    // The block: a notice-blue wash instead of the invisible tool row. Every
-    // ask row gets it, the live question included.
+    // Token host only: the row itself stays host-native (no wash, no padding)
+    // so the transcript card is the single blue layer.
     ROW_SELECTOR + ' {',
     '  --ux-plus-notice: var(--dsw-alias-button-info-fill);',
-    '  background: color-mix(in srgb, var(--ux-plus-notice) 20%, transparent);',
-    '  border-radius: var(--dsw-radius-lg);',
-    '  padding: 4px 8px;',
     '}',
-    // The transcript card rides the wash instead of dropping a gray plate on it.
+    // The one blue layer: the transcript card that shows question + answer.
     ROW_SELECTOR + ' [class*="_card"] {',
     '  background: color-mix(in srgb, var(--ux-plus-notice) 14%, transparent);',
     '  border-color: color-mix(in srgb, var(--ux-plus-notice) 45%, transparent);',
     '}',
-    // White: the question, its answer, and the row's own title and summary.
-    ROW_CSS_SCOPE + ' :is([class*="_title"], [class*="_summary"], [class*="_question"],',
-    '  [class*="_answer"], [class*="_verdict"], [class*="_unansweredQuestion"]) {',
+    // White: the answer the user gave, the verdict line, and the row chrome.
+    ROW_CSS_SCOPE + ' :is([class*="_title"], [class*="_summary"],',
+    '  [class*="_answer"], [class*="_verdict"]) {',
     '  color: var(--dsw-alias-label-primary);',
+    '}',
+    // Gray + smaller: the original question, so it recedes behind the answer.
+    ROW_CSS_SCOPE + ' :is([class*="_question"], [class*="_unansweredQuestion"]) {',
+    '  color: var(--dsw-alias-label-secondary);',
+    '  font-size: calc(var(--dsh-content-font-size, 14px) - 1px);',
     '}',
     // White tone: the secondary tier — the skipped placeholder, chevron, dot.
     ROW_CSS_SCOPE + ' :is([class*="_skipped"], [class*="_chevron"]) {',
