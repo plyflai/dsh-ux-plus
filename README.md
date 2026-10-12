@@ -1,6 +1,6 @@
 # dsh-ux-plus
 
-让Deepseek Harness变得更顺手的各种小功能和UX增强包。
+让Deepseek Harness变得更顺手各种UX增强与功能插件。
 
 [![CI](https://github.com/plyflai/dsh-ux-plus/actions/workflows/ci.yml/badge.svg)](https://github.com/plyflai/dsh-ux-plus/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
@@ -32,7 +32,7 @@ dsh plugin --profile <name> add github:plyflai/dsh-ux-plus
 
 每次推送到 main 在此追加一条，最新在上；完整历史见 [CHANGELOG.md](CHANGELOG.md)。
 
-- **main · 2026-10-11 · `ed6df06`** — 提问展开样式收敛：浅蓝只保留问答卡片一层（去掉外层行铺底）；答案白色，原始问题字号略小、颜色略灰。
+- **v0.1.2 · 2026-10-12** — 提问展开样式收敛：浅蓝只保留问答卡片一层（去掉外层行铺底）；答案白色，原始问题字号略小、颜色略灰。
 - **v0.1.1 · 2026-10-11** — 提问块改用通知蓝；修复组内会话行排序在手动排序/筛选下静默失效；修复折叠分组配额导致的行层整段失效。
 - **v0.1.0 · 2026-10-09** — 首个版本：对话字号与宽度、复制会话 ID、最近活动排序、提问结果默认展开。
 
