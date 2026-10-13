@@ -6,6 +6,6 @@
 - Keep feature modules under `features/` and register them in the host and client feature lists. They are private implementation modules, not separate installable plugins.
 - Preserve lifecycle disposal and the existing built-artifact checks in `scripts/build.js`.
 - Run `npm test` and `npm run build` for source changes. Commit the rebuilt `lib/client.js` because GitHub installs use it.
-- Every push to `main` appends one dated, newest-first bullet to the README 更新记录 section (one-line summary of what the push changed) and keeps the matching entry in `CHANGELOG.md`.
+- Every push to `main` must be a versioned release: bump the version in `package.json` and `package-lock.json` first, then append one newest-first bullet to the README 更新记录 section labeled `**vX.Y.Z · YYYY-MM-DD**` — never `main`, never an unversioned date — with a one-line summary of what the push changed, and keep the matching entry under that same version in `CHANGELOG.md`.
 - Before publishing a package, inspect `npm pack --dry-run` and verify the packed host entry can load independently of the checkout.
 - Keep user documentation focused on installation, behavior, compatibility, and development. Personal runtime configuration and deployment records belong outside this repository.
