@@ -4,7 +4,8 @@
  * P3: the `UX Plus` settings section (plan D2) is a real switch list — one
  * row per feature (frozen ids `conversation-typography`,
  * `workspace-session-menu`, `workspace-recency-order`,
- * `tool-ask-question-expanded`), each backed by a boolean key in the
+ * `tool-ask-question-expanded`, `workspace-session-inherit`), each backed by
+ * a boolean key in the
  * `ux-plus` settings section registered by the host half (all default `true`).
  *
  * Switch behavior (plan D5) lives in `./switches.js` (the React-free
@@ -25,7 +26,7 @@
  * the host entries `ux-plus` and `ui-tweak`.
  */
 import * as React from 'react'
-import { MenuItemButton, IconCopyOutlineRegular } from '@deepseek-ai/dsh-client-ui-primitives'
+import { MenuItemButton, IconCopyOutlineRegular, IconRightUpOutlineRegular } from '@deepseek-ai/dsh-client-ui-primitives'
 import { FEATURES, mountFeatures } from './switches.js'
 
 /**
@@ -39,8 +40,12 @@ import { FEATURES, mountFeatures } from './switches.js'
  * `dsh-workspace-folder-order` client.js:178); without it this entry applied
  * too early (before the session/workspace providers mounted) and its two
  * DOM features silently no-op'd. Both names exist on the web-app surface.
+ * `remote` + `remote.session` are additionally declared for the
+ * inherit-conversation feature (model catalog / selectModel / prompt remotes;
+ * same declaration as the host's own `ui-open-in-app` client,
+ * packages/client/ui-open-in-app/src/client/index.ts:39).
  */
-export const inject = ['slots', 'locale', 'configForms', 'sessions', 'workspaces']
+export const inject = ['slots', 'locale', 'configForms', 'sessions', 'workspaces', 'remote', 'remote.session']
 
 /**
  * Self-contained toggle switch built only on the `react` seed.
@@ -164,7 +169,7 @@ export function apply(ctx) {
   // to a no-op instead of failing the tab.
   const deps = {
     react: React,
-    primitives: { MenuItemButton, IconCopyOutlineRegular },
+    primitives: { MenuItemButton, IconCopyOutlineRegular, IconRightUpOutlineRegular },
     tweakScope,
     sessions: ctx.get('sessions'),
     workspaces: ctx.get('workspaces'),

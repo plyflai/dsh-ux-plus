@@ -1,7 +1,7 @@
 /**
  * P3 switch-engine tests (plain Node, no browser, no React):
  *
- *   - the `ux-plus` switch keys are exactly the four frozen feature ids;
+ *   - the `ux-plus` switch keys are exactly the five frozen feature ids;
  *   - every source file of the package imports only the nine shell seeds or
  *     relative paths (client-half seed discipline, source level — the built
  *     artifact is asserted mechanically by scripts/build.js, R10);
@@ -19,7 +19,7 @@ import { test } from 'node:test'
 const root = new URL('..', import.meta.url)
 
 /** Frozen feature ids (plan v2.5 naming freeze). */
-const FROZEN = ['conversation-typography', 'workspace-session-menu', 'workspace-recency-order', 'tool-ask-question-expanded']
+const FROZEN = ['conversation-typography', 'workspace-session-menu', 'workspace-recency-order', 'tool-ask-question-expanded', 'workspace-session-inherit']
 
 /** The nine shell-seeded module-table specifiers (host platform.ts:8-14). */
 const SEEDS = [
@@ -224,7 +224,7 @@ function makeMenuDeps() {
       createElement: (type, props, ...children) => ({ type, props, children }),
       useState: () => [failed, (next) => { failed = next }],
     },
-    primitives: { MenuItemButton: 'menu-item', IconCopyOutlineRegular: 'copy-icon' },
+    primitives: { MenuItemButton: 'menu-item', IconCopyOutlineRegular: 'copy-icon', IconRightUpOutlineRegular: 'inherit-icon' },
   }
 }
 
@@ -300,11 +300,55 @@ function featureUrl(name) {
   return new URL(`features/${name}/src/index.js`, root)
 }
 
+/** Flush pending microtasks (the inherit picker flow is a pure promise chain). */
+async function flush(times = 16) {
+  for (let i = 0; i < times; i += 1) await Promise.resolve()
+}
+
+/** Concatenated textContent of a fake element subtree (no cycles like JSON.stringify). */
+function allText(node) {
+  let out = node.textContent || ''
+  for (const child of node.children || []) out += ` ${allText(child)}`
+  return out
+}
+
+/** Fake remote/services for the inherit feature; overrides replace remote.session members. */
+function makeInheritEnv(overrides = {}) {
+  const calls = { create: [], selectModel: [], prompt: [], opened: [] }
+  const ctx = makeCtx()
+  ctx.get = (serviceName) => (serviceName === 'uiWorkspace'
+    ? { openSession: (id) => calls.opened.push(id) }
+    : undefined)
+  ctx.remote = {
+    session: {
+      modelCatalog: async () => ({
+        ok: true,
+        value: {
+          groups: [{
+            id: 'p1',
+            name: 'Provider 1',
+            models: [{ id: 'm1', name: 'Model One', description: 'first' }, { id: 'm2', name: 'Model Two' }],
+          }],
+        },
+      }),
+      selectModel: async (req) => { calls.selectModel.push(req); return { ok: true, value: undefined } },
+      prompt: async (req) => { calls.prompt.push(req); return { ok: true, value: undefined } },
+      ...overrides,
+    },
+  }
+  const deps = {
+    ...makeMenuDeps(),
+    sessions: { create: async (opts) => { calls.create.push(opts); return `new-${calls.create.length}` } },
+    workspaces: { list: makeListStore(workspacesSnap) },
+  }
+  return { ctx, deps, calls }
+}
+
 // ---------------------------------------------------------------------------
 // Tests.
 // ---------------------------------------------------------------------------
 
-test('the ux-plus switch keys are exactly the four frozen feature ids', async () => {
+test('the ux-plus switch keys are exactly the five frozen feature ids', async () => {
   for (const name of FROZEN) {
     const { feature } = await import(featureUrl(name).href)
     assert.equal(feature.id, name)
@@ -501,9 +545,10 @@ test('the D5 switch engine mounts and disposes each feature per switch value', a
     assert.equal(uxScope.subscribeCount(), 1)
     assert.equal(otherStyles().length, 1) // typography style
     assert.equal(accentStyles().length, 1, 'the ask-question accent style is mounted')
-    const menu = () => ctx.registrations.filter((row) => row.key === 'sidebar.workspaces.session.menu.item' && !row.retired)
-    assert.equal(menu().length, 1)
-    assert.equal(env.listenerCount('document', 'pointerdown'), 0)
+    const menuRows = (id) => ctx.registrations.filter((row) => row.opts.id === id && !row.retired)
+    assert.equal(menuRows('dsh-ux-plus.copy-session-id').length, 1)
+    assert.equal(menuRows('dsh-ux-plus.inherit-session').length, 1, 'the inherit row registers alongside the copy row')
+    assert.equal(env.listenerCount('document', 'pointerdown'), 1, 'the inherit feature tracks the click anchor')
     assert.equal(env.listenerCount('document', 'click'), 0) // recency-order installs none
     assert.equal(env.windowListeners.storage, undefined)
     assert.equal(env.moInstances.length, 2)
@@ -511,11 +556,11 @@ test('the D5 switch engine mounts and disposes each feature per switch value', a
     assert.equal(tree.style.display, 'flex', 'recency-order applied the visual order')
 
     await uxScope.set('workspace-session-menu', false)
-    assert.equal(menu().length, 0, 'off removes the native menu row immediately')
-    assert.ok(ctx.locales.every((row) => row.retired), 'off removes the menu locale')
+    assert.equal(menuRows('dsh-ux-plus.copy-session-id').length, 0, 'off removes the native menu row immediately')
+    assert.ok(ctx.locales.filter((row) => row.namespace === 'ux-plus-session-menu').every((row) => row.retired), 'off removes the menu locale')
     assert.equal(otherStyles().length, 1, 'the other features stay on')
     await uxScope.set('workspace-session-menu', true)
-    assert.equal(menu().length, 1, 'on re-registers the native menu row immediately')
+    assert.equal(menuRows('dsh-ux-plus.copy-session-id').length, 1, 'on re-registers the native menu row immediately')
 
     await uxScope.set('conversation-typography', false)
     assert.equal(otherStyles().length, 0, 'typography off removes the style tag')
@@ -534,14 +579,196 @@ test('the D5 switch engine mounts and disposes each feature per switch value', a
     env.flushTimers()
     assert.equal(tree.style.display, 'flex', 'on re-applies the visual order')
 
+    await uxScope.set('workspace-session-inherit', false)
+    assert.equal(menuRows('dsh-ux-plus.inherit-session').length, 0, 'off removes the inherit menu row')
+    assert.equal(env.listenerCount('document', 'pointerdown'), 0, 'off removes the click anchor tracker')
+    await uxScope.set('workspace-session-inherit', true)
+    assert.equal(menuRows('dsh-ux-plus.inherit-session').length, 1, 'on re-registers the inherit menu row')
+    assert.equal(env.listenerCount('document', 'pointerdown'), 1, 'on re-installs the click anchor tracker')
+
     disposeAll()
-    assert.equal(menu().length, 0)
+    assert.equal(menuRows('dsh-ux-plus.copy-session-id').length, 0)
+    assert.equal(menuRows('dsh-ux-plus.inherit-session').length, 0)
     assert.ok(ctx.locales.every((row) => row.retired))
     assert.equal(env.document.head.children.length, 0)
     assert.equal(env.listenerCount('document', 'pointerdown'), 0)
     assert.equal(env.listenerCount('document', 'click'), 0)
     assert.equal(env.windowListeners.storage, undefined)
     assert.equal(uxScope.subscribeCount(), 0, 'the plugin disposer stops the switch sync')
+  } finally {
+    uninstallGlobals(env)
+  }
+})
+
+test('workspace-session-inherit: menu row opens the picker, inherits via create/selectModel/prompt/open', async () => {
+  const env = makeEnv()
+  installGlobals(env)
+  let dispose
+  try {
+    const { feature } = await import(featureUrl('workspace-session-inherit').href)
+    const { ctx, deps, calls } = makeInheritEnv()
+    dispose = feature.client(ctx, deps)
+    const row = ctx.registrations.find((entry) => entry.opts.id === 'dsh-ux-plus.inherit-session')
+    assert.ok(row, 'the action registers into the host session-menu slot')
+    assert.equal(row.opts.order, 60, 'the row sits after the copy row (50) and before the host pin (100)')
+    assert.equal(ctx.locales[0].namespace, row.opts.locale)
+    assert.equal(ctx.locales[0].messages.zh.inherit, '继承对话')
+    assert.ok(ctx.locales[0].messages.zh.prompt.includes('{sessionId}'))
+    assert.ok(ctx.locales[0].messages.zh.prompt.includes('越近轮次'))
+    assert.ok(ctx.locales[0].messages.en.prompt.includes('{sessionId}'))
+
+    const openStates = []
+    const t = (key) => (key === 'prompt' ? '{sessionId}::X' : key)
+    const item = row.comp({ sessionId: 's2', useMenuOpenState: () => [true, (open) => openStates.push(open)], t })
+    assert.equal(item.children[0], 'inherit')
+    item.props.onSelect()
+    assert.deepEqual(openStates, [false], 'opening the picker dismisses the owning menu')
+    const container = env.document.body.children[0]
+    assert.ok(container, 'the picker mounts into document.body')
+    assert.equal(container.attributes['data-dsh-ux-plus'], 'session-inherit')
+    assert.equal(container.attributes.role, 'dialog')
+    assert.ok(allText(container).includes('loading'), 'the catalog loads before rows appear')
+    await flush()
+    const panel = container.children[0]
+    const modelRows = panel.children.filter((child) => child.attributes['data-model'])
+    assert.deepEqual(modelRows.map((child) => child.attributes['data-model']), ['p1/m1', 'p1/m2'])
+    assert.ok(allText(panel).includes('Provider 1'), 'provider groups are labelled')
+    assert.ok(allText(modelRows[0]).includes('first'), 'a model description is shown')
+
+    modelRows[0].onclick()
+    await flush()
+    assert.deepEqual(calls.create, [{ workspaceId: 'w-b' }], 'the new session joins the source workspace (s2 lives in w-b)')
+    assert.deepEqual(calls.selectModel, [{ sessionId: 'new-1', provider: 'p1', model: 'm1' }])
+    assert.equal(calls.prompt.length, 1)
+    const request = calls.prompt[0]
+    assert.equal(request.sessionId, 'new-1')
+    assert.equal(request.mode, 'queue')
+    assert.deepEqual(request.content, [{ type: 'text', text: 's2::X' }], 'the prompt carries the source session ID')
+    assert.equal(typeof request.requestId, 'string')
+    assert.ok(request.requestId.length > 0)
+    assert.deepEqual(calls.opened, ['new-1'], 'the fresh session opens in the current view')
+    assert.equal(env.document.body.children.length, 0, 'success closes the picker')
+
+    // Second opening: dismissal paths.
+    item.props.onSelect()
+    const second = env.document.body.children[0]
+    await flush()
+    env.listeners.pointerdown[1].fn({ target: second })
+    assert.ok(second.isConnected, 'a click inside the picker keeps it open')
+    env.listeners.keydown[0].fn({ key: 'Escape' })
+    assert.equal(env.document.body.children.length, 0, 'Escape closes the picker')
+
+    item.props.onSelect()
+    const third = env.document.body.children[0]
+    await flush()
+    const closeButton = third.children[0].children[0].children[1]
+    assert.equal(closeButton.textContent, '×')
+    closeButton.onclick()
+    assert.equal(env.document.body.children.length, 0, 'the header cross closes the picker')
+
+    item.props.onSelect()
+    const fourth = env.document.body.children[0]
+    await flush()
+    env.listeners.pointerdown[1].fn({ target: makeElement('div') })
+    assert.equal(env.document.body.children.length, 0, 'an outside click closes the picker')
+
+    dispose()
+    dispose = undefined
+    assert.ok(row.retired, 'cleanup removes the native menu registration')
+    assert.ok(ctx.locales[0].retired, 'cleanup removes the locale registration')
+    assert.equal(env.listenerCount('document', 'pointerdown'), 0, 'cleanup removes the click anchor tracker')
+  } finally {
+    dispose?.()
+    uninstallGlobals(env)
+  }
+})
+
+test('workspace-session-inherit: a failed inherit keeps the picker open and a retry reuses the session', async () => {
+  const env = makeEnv()
+  installGlobals(env)
+  let dispose
+  try {
+    const { feature } = await import(featureUrl('workspace-session-inherit').href)
+    let selectFails = true
+    const { ctx, deps, calls } = makeInheritEnv({
+      selectModel: async (req) => {
+        calls.selectModel.push(req)
+        return selectFails
+          ? { ok: false, error: { code: 'session/model-unavailable' } }
+          : { ok: true, value: undefined }
+      },
+    })
+    dispose = feature.client(ctx, deps)
+    const row = ctx.registrations.find((entry) => entry.opts.id === 'dsh-ux-plus.inherit-session')
+    const item = row.comp({ sessionId: 's1', useMenuOpenState: () => [true, () => {}], t: (key) => key })
+    item.props.onSelect()
+    await flush()
+    const container = env.document.body.children[0]
+    const modelRow = container.children[0].children.find((child) => child.attributes['data-model'] === 'p1/m1')
+    modelRow.onclick()
+    modelRow.onclick()
+    await flush()
+    assert.equal(calls.create.length, 1, 'a double click cannot start two inheritances')
+    assert.equal(env.document.body.children.length, 1, 'a failed inherit keeps the picker open for a retry')
+    assert.ok(allText(container).includes('startFailed'), 'the failure is surfaced in the picker')
+    assert.deepEqual(calls.opened, [], 'a failed inherit does not open the session')
+
+    selectFails = false
+    modelRow.onclick()
+    await flush()
+    assert.equal(calls.create.length, 1, 'the retry reuses the session created by the first attempt')
+    assert.deepEqual(calls.selectModel.map((req) => req.sessionId), ['new-1', 'new-1'])
+    assert.deepEqual(calls.opened, ['new-1'])
+    assert.equal(env.document.body.children.length, 0, 'the successful retry closes the picker')
+  } finally {
+    dispose?.()
+    uninstallGlobals(env)
+  }
+})
+
+test('workspace-session-inherit: catalog load failure and empty catalog render their states', async () => {
+  const env = makeEnv()
+  installGlobals(env)
+  for (const [label, value] of [['load failure', { ok: false, error: { message: 'boom' } }], ['empty catalog', { ok: true, value: { groups: [] } }]]) {
+    try {
+      const { feature } = await import(featureUrl('workspace-session-inherit').href)
+      const { ctx, deps } = makeInheritEnv({ modelCatalog: async () => value })
+      const dispose = feature.client(ctx, deps)
+      const row = ctx.registrations.find((entry) => entry.opts.id === 'dsh-ux-plus.inherit-session')
+      row.comp({ sessionId: 's1', useMenuOpenState: () => [true, () => {}], t: (key) => key }).props.onSelect()
+      const container = env.document.body.children[0]
+      await flush()
+      assert.equal(env.document.body.children.length, 1, `${label}: the picker stays open`)
+      assert.ok(allText(container).includes(label === 'load failure' ? 'loadFailed' : 'empty'), label)
+      assert.equal(container.children[0].children.filter((child) => child.attributes['data-model']).length, 0, `${label}: no model rows`)
+      dispose()
+    } finally {
+      uninstallGlobals(env)
+    }
+    installGlobals(env)
+  }
+})
+
+test('workspace-session-inherit: startInheritance falls back to a host-chosen workspace and surfaces remote failures', async () => {
+  const env = makeEnv()
+  installGlobals(env)
+  try {
+    const { startInheritance } = await import(featureUrl('workspace-session-inherit').href)
+    const { ctx, deps, calls } = makeInheritEnv()
+    await startInheritance({ ctx, deps, sessionId: 'unknown-session', provider: 'p9', model: 'm9', promptText: 'go', carry: {} })
+    assert.deepEqual(calls.create, [{}], 'an unknown source session creates without a workspace (host default)')
+    assert.deepEqual(calls.opened, ['new-1'])
+
+    const promptFails = { ...ctx, remote: { session: { ...ctx.remote.session, prompt: async () => ({ ok: false, error: { code: 'session/conflict' } }) } } }
+    await assert.rejects(
+      startInheritance({ ctx: promptFails, deps, sessionId: 'unknown-session', provider: 'p9', model: 'm9', promptText: 'go', carry: {} }),
+      /prompt failed/,
+    )
+    const throwing = { ...ctx, remote: { session: { ...ctx.remote.session, selectModel: async () => { throw new Error('remote down') } } } }
+    await assert.rejects(
+      startInheritance({ ctx: throwing, deps, sessionId: 'unknown-session', provider: 'p9', model: 'm9', promptText: 'go', carry: {} }),
+      /remote down/,
+    )
   } finally {
     uninstallGlobals(env)
   }
