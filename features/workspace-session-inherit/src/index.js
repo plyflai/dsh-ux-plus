@@ -98,8 +98,8 @@ const PANEL_STYLE = {
   width: '260px',
   maxHeight: '320px',
   overflowY: 'auto',
-  background: 'var(--dsw-alias-bg-elevated, #24272e)',
-  border: '1px solid var(--dsw-border-strong, #3a3f4b)',
+  background: 'var(--dsw-alias-bg-layer-2, #24272e)',
+  border: '1px solid var(--dsw-alias-border-l2, #3a3f4b)',
   borderRadius: '10px',
   boxShadow: '0 10px 30px rgba(0, 0, 0, 0.35)',
   color: 'var(--dsw-alias-label-primary, #e8e8e8)',
@@ -113,7 +113,7 @@ const HEADER_STYLE = {
   padding: '8px 10px',
   fontSize: '12px',
   color: 'var(--dsw-alias-label-secondary, #9aa0ab)',
-  borderBottom: '1px solid var(--dsw-border-strong, #3a3f4b)',
+  borderBottom: '1px solid var(--dsw-alias-border-l2, #3a3f4b)',
 }
 const ICON_BUTTON_STYLE = {
   background: 'transparent',
@@ -138,7 +138,7 @@ const ROW_STYLE = {
   cursor: 'pointer',
 }
 const MODEL_DESC_STYLE = { fontSize: '11px', color: 'var(--dsw-alias-label-secondary, #9aa0ab)', marginTop: '1px' }
-const ERROR_STYLE = { padding: '8px 10px', fontSize: '12px', color: '#e5534b', borderTop: '1px solid var(--dsw-border-strong, #3a3f4b)' }
+const ERROR_STYLE = { padding: '8px 10px', fontSize: '12px', color: '#e5534b', borderTop: '1px solid var(--dsw-alias-border-l2, #3a3f4b)' }
 
 /**
  * Floating model picker anchored at the click point. Plain DOM (no React) so
@@ -215,6 +215,8 @@ export function openPicker(ctx, deps, { sessionId, t, anchor }) {
           row.appendChild(text(el('div'), model.name || model.id))
           if (model.description) row.appendChild(text(el('div', MODEL_DESC_STYLE), model.description))
           row.onclick = () => choose(group, model)
+          row.onmouseenter = () => { row.style.background = 'var(--dsw-alias-interactive-bg-hover, rgba(128, 128, 128, 0.12))' }
+          row.onmouseleave = () => { row.style.background = 'transparent' }
           panel.appendChild(row)
         }
       }
