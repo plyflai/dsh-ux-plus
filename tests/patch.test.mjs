@@ -6,7 +6,7 @@ const root = new URL('../', import.meta.url)
 const readJson = async (name) => JSON.parse(await readFile(new URL(name, root), 'utf8'))
 
 /** Frozen feature sub-package names (plan §3.8, directory names). */
-const FEATURES = ['conversation-typography', 'workspace-session-menu', 'workspace-recency-order', 'tool-ask-question-expanded', 'workspace-session-inherit']
+const FEATURES = ['conversation-typography', 'workspace-session-menu', 'workspace-recency-order', 'tool-ask-question-expanded', 'workspace-session-inherit', 'workspace-idle-collapse']
 
 /**
  * Collect `- id:` rows (with their following `name:`) from a patch document.
@@ -52,7 +52,7 @@ test('manifest declares the host entry, the browser entry, and a well-formed dsh
   assert.ok(Array.isArray(manifest.dsh?.client?.inject))
 })
 
-test('the four feature sub-packages exist under their frozen names', async () => {
+test('the feature sub-packages exist under their frozen names', async () => {
   for (const name of FEATURES) {
     const feature = await readJson(`features/${name}/package.json`)
     assert.equal(feature.name, `@dsh-ux-plus/${name}`)

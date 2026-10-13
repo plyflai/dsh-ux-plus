@@ -19,7 +19,7 @@ import { test } from 'node:test'
 const root = new URL('..', import.meta.url)
 
 /** Frozen feature ids (plan v2.5 naming freeze). */
-const FROZEN = ['conversation-typography', 'workspace-session-menu', 'workspace-recency-order', 'tool-ask-question-expanded', 'workspace-session-inherit']
+const FROZEN = ['conversation-typography', 'workspace-session-menu', 'workspace-recency-order', 'tool-ask-question-expanded', 'workspace-session-inherit', 'workspace-idle-collapse']
 
 /** The nine shell-seeded module-table specifiers (host platform.ts:8-14). */
 const SEEDS = [
@@ -348,7 +348,7 @@ function makeInheritEnv(overrides = {}) {
 // Tests.
 // ---------------------------------------------------------------------------
 
-test('the ux-plus switch keys are exactly the five frozen feature ids', async () => {
+test('the ux-plus switch keys are exactly the six frozen feature ids', async () => {
   for (const name of FROZEN) {
     const { feature } = await import(featureUrl(name).href)
     assert.equal(feature.id, name)
@@ -563,20 +563,25 @@ test('the D5 switch engine mounts and disposes each feature per switch value', a
     // lifecycle, and the typography assertions below must not absorb it.
     const accentStyles = () =>
       env.document.head.children.filter((c) => c.attributes['data-feature'] === 'tool-ask-question-expanded')
+    const idleStyles = () =>
+      env.document.head.children.filter((c) => c.dataset.dshUxPlus === 'idle-collapse-css')
     const otherStyles = () =>
       env.document.head.children.filter(
-        (c) => c.tagName === 'STYLE' && c.attributes['data-feature'] !== 'tool-ask-question-expanded',
+        (c) => c.tagName === 'STYLE'
+          && c.attributes['data-feature'] !== 'tool-ask-question-expanded'
+          && c.dataset.dshUxPlus !== 'idle-collapse-css',
       )
     assert.equal(uxScope.subscribeCount(), 1)
     assert.equal(otherStyles().length, 1) // typography style
     assert.equal(accentStyles().length, 1, 'the ask-question accent style is mounted')
+    assert.equal(idleStyles().length, 1, 'the idle-collapse style tag is mounted')
     const menuRows = (id) => ctx.registrations.filter((row) => row.opts.id === id && !row.retired)
     assert.equal(menuRows('dsh-ux-plus.copy-session-id').length, 1)
     assert.equal(menuRows('dsh-ux-plus.inherit-session').length, 1, 'the inherit row registers alongside the copy row')
     assert.equal(env.listenerCount('document', 'pointerdown'), 1, 'the inherit feature tracks the click anchor')
     assert.equal(env.listenerCount('document', 'click'), 0) // recency-order installs none
     assert.equal(env.windowListeners.storage, undefined)
-    assert.equal(env.moInstances.length, 2)
+    assert.equal(env.moInstances.length, 3)
     env.flushTimers()
     assert.equal(tree.style.display, 'flex', 'recency-order applied the visual order')
 
@@ -610,6 +615,11 @@ test('the D5 switch engine mounts and disposes each feature per switch value', a
     await uxScope.set('workspace-session-inherit', true)
     assert.equal(menuRows('dsh-ux-plus.inherit-session').length, 1, 'on re-registers the inherit menu row')
     assert.equal(env.listenerCount('document', 'pointerdown'), 1, 'on re-installs the click anchor tracker')
+
+    await uxScope.set('workspace-idle-collapse', false)
+    assert.equal(idleStyles().length, 0, 'idle-collapse off removes the style tag')
+    await uxScope.set('workspace-idle-collapse', true)
+    assert.equal(idleStyles().length, 1, 'idle-collapse on re-installs the style tag')
 
     disposeAll()
     assert.equal(menuRows('dsh-ux-plus.copy-session-id').length, 0)
@@ -794,6 +804,157 @@ test('workspace-session-inherit: startInheritance falls back to a host-chosen wo
       startInheritance({ ctx: throwing, deps, sessionId: 'unknown-session', provider: 'p9', model: 'm9', promptText: 'go', carry: {} }),
       /remote down/,
     )
+  } finally {
+    uninstallGlobals(env)
+  }
+})
+
+// ---------------------------------------------------------------------------
+// workspace-idle-collapse
+// ---------------------------------------------------------------------------
+
+test('workspace-idle-collapse: age labels mirror the host session-time buckets', async () => {
+  const { ageLabel } = await import(featureUrl('workspace-idle-collapse').href)
+  const MIN = 60e3
+  const HOUR = 3600e3
+  const DAY = 864e5
+  assert.equal(ageLabel('zh', 30_000), '刚刚')
+  assert.equal(ageLabel('zh', 5 * MIN + 9000), '5分钟')
+  assert.equal(ageLabel('zh', 23 * HOUR), '23小时')
+  assert.equal(ageLabel('zh', 25 * HOUR), '1天')
+  assert.equal(ageLabel('zh', 45 * DAY), '1个月')
+  assert.equal(ageLabel('zh', 400 * DAY), '1年')
+  assert.equal(ageLabel('en', 30_000), 'now')
+  assert.equal(ageLabel('en', 5 * MIN), '5m')
+  assert.equal(ageLabel('en', 2 * HOUR), '2h')
+  assert.equal(ageLabel('en', 3 * DAY), '3d')
+  assert.equal(ageLabel('en', 45 * DAY), '1mo')
+  assert.equal(ageLabel('en', 400 * DAY), '1y')
+  // Non-zh locale ids fall back to the English buckets.
+  assert.equal(ageLabel(undefined, 2 * HOUR), '2h')
+})
+
+/**
+ * Fake env for idle-collapse: one workspace row per fixture entry (plus the
+ * ungrouped and unknown-workspace rows), list snapshots with controlled
+ * session ages, and a locale seat. `spec.collapsed: true` renders the row
+ * already collapsed; `blank`/`subagent` mark the single member session.
+ */
+function makeIdleEnv({ locale = 'zh', workspaces = {} } = {}) {
+  const env = makeEnv()
+  const now = Date.now()
+  const byId = {}
+  const items = []
+  const rows = []
+  const rowFor = (key) => {
+    const row = makeElement('div')
+    row.setAttribute('data-row-key', `workspace:${key}`)
+    row.setAttribute('aria-expanded', 'true')
+    row.clicks = 0
+    row.click = () => { row.clicks += 1 }
+    const title = makeElement('span')
+    title.className = 'projectText'
+    const actions = makeElement('span')
+    actions.className = 'hash_rowActions'
+    row.appendChild(title)
+    row.appendChild(actions)
+    rows.push(row)
+    return row
+  }
+  for (const [workspaceId, spec] of Object.entries(workspaces)) {
+    const sessionIds = []
+    if (spec.age !== undefined) {
+      const sessionId = `${workspaceId}-s1`
+      byId[sessionId] = {
+        id: sessionId,
+        updatedAt: now - spec.age,
+        ...(spec.blank ? { blank: true } : {}),
+        ...(spec.subagent ? { origin: 'subagent' } : {}),
+      }
+      sessionIds.push(sessionId)
+    }
+    items.push({ workspaceId, path: `/${workspaceId}`, title: workspaceId, sessionIds })
+    const row = rowFor(workspaceId)
+    if (spec.collapsed === true) row.setAttribute('aria-expanded', 'false')
+  }
+  rowFor('')        // the ungrouped bucket row is never touched
+  rowFor('w-ghost') // a row whose workspace is not in the snapshot
+  const ctx = makeCtx()
+  ctx.locale = {
+    getSnapshot: () => ({ active: locale }),
+    subscribe: (fn) => { env.localeSub = fn; return () => { env.localeSub = null } },
+  }
+  const deps = {
+    sessions: { list: makeListStore({ phase: 'ready', byId, ids: Object.keys(byId) }) },
+    workspaces: { list: makeListStore({ phase: 'ready', items, archivedSessionIds: [], pinnedSessionIds: [] }) },
+  }
+  env.document.querySelectorAll = (selector) =>
+    (selector === '[data-row-key^="workspace:"]' ? rows : [])
+  env.rowOf = (key) => rows.find((row) => row.getAttribute('data-row-key') === `workspace:${key}`)
+  env.labelOf = (key) => {
+    const row = env.rowOf(key)
+    return row === undefined ? undefined : row.children.find((c) => c.dataset.dshUxPlus === 'workspace-age')
+  }
+  return { env, ctx, deps }
+}
+
+test('workspace-idle-collapse: idle groups collapse once and active rows age', async () => {
+  const HOUR = 3600e3
+  const { env, ctx, deps } = makeIdleEnv({ workspaces: {
+    'w-old': { age: 25 * HOUR },
+    'w-fresh': { age: 2 * HOUR },
+    'w-none': {},
+    'w-blank': { age: 30 * HOUR, blank: true },
+    'w-sub': { age: 40 * HOUR, subagent: true },
+    'w-shut': { age: 30 * HOUR, collapsed: true },
+  } })
+  installGlobals(env)
+  try {
+    const { feature } = await import(featureUrl('workspace-idle-collapse').href)
+    const dispose = feature.client(ctx, deps)
+    env.flushTimers()
+    assert.equal(env.labelOf('w-old').textContent, '1天')
+    assert.equal(env.labelOf('w-fresh').textContent, '2小时')
+    assert.ok(env.labelOf('w-shut'), 'a collapsed idle group still ages')
+    assert.equal(env.labelOf('w-none'), undefined, 'no activity → no label')
+    assert.equal(env.labelOf('w-blank'), undefined, 'blank-only workspaces have no signal')
+    assert.equal(env.labelOf('w-sub'), undefined, 'subagent-only workspaces have no signal')
+    assert.equal(env.labelOf('w-ghost'), undefined, 'unknown workspaces are left alone')
+    assert.equal(env.labelOf(''), undefined, 'the ungrouped bucket is never labeled')
+    assert.equal(env.rowOf('w-old').clicks, 1, 'the idle expanded group collapses once')
+    assert.equal(env.rowOf('w-fresh').clicks, 0, 'a fresh group is never clicked')
+    assert.equal(env.rowOf('w-shut').clicks, 0, 'an already-collapsed group is not clicked')
+    // A later pass (store traffic, aging tick) never re-collapses: a manual
+    // re-expand is respected for the rest of the page load.
+    env.moInstances[0].cb()
+    env.flushTimers()
+    assert.equal(env.rowOf('w-old').clicks, 1, 'collapse happens at most once per page load')
+    dispose()
+    assert.equal(env.labelOf('w-old'), undefined, 'dispose removes the labels')
+    assert.equal(env.document.head.children.length, 0, 'dispose removes the style tag')
+    assert.equal(deps.sessions.list.subscribeCount(), 0, 'dispose unsubscribes the session list')
+    assert.equal(deps.workspaces.list.subscribeCount(), 0, 'dispose unsubscribes the workspace list')
+    assert.equal(env.localeSub, null, 'dispose unsubscribes the locale')
+    assert.ok(env.moInstances[0].disconnected, 'dispose disconnects the observer')
+  } finally {
+    uninstallGlobals(env)
+  }
+})
+
+test('workspace-idle-collapse: labels follow the active locale', async () => {
+  const HOUR = 3600e3
+  const { env, ctx, deps } = makeIdleEnv({ locale: 'en', workspaces: { 'w-old': { age: 26 * HOUR } } })
+  installGlobals(env)
+  try {
+    const { feature } = await import(featureUrl('workspace-idle-collapse').href)
+    const dispose = feature.client(ctx, deps)
+    env.flushTimers()
+    assert.equal(env.labelOf('w-old').textContent, '1d')
+    ctx.locale.getSnapshot = () => ({ active: 'zh' })
+    env.localeSub()
+    env.flushTimers()
+    assert.equal(env.labelOf('w-old').textContent, '1天', 'a locale switch re-renders the label')
+    dispose()
   } finally {
     uninstallGlobals(env)
   }
