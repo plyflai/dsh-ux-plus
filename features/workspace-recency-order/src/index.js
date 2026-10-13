@@ -18,8 +18,16 @@
  *                             visual order changes: React child order,
  *                             host store state (orderBy /
  *                             sessionOrderByAccount) and host data stay
- *                             intact. The disposer restores every cached
- *                             original style and removes all
+ *                             intact. Same switch, same activity signal:
+ *                             the idle sub-behavior additionally collapses
+ *                             workspaces idle for over 24 hours (once per
+ *                             workspace per page load, through the host's
+ *                             own row click handler — the persisted view
+ *                             store is never touched) and labels every
+ *                             workspace row with its host-styled age
+ *                             ("多久没更新"). The disposer restores every
+ *                             cached original style, removes all labels and
+ *                             the style tag, and removes all
  *                             listeners/observers/subscriptions/timers —
  *                             immediate, no refresh, no residue (off ==
  *                             never installed).
@@ -75,12 +83,12 @@
 
 export const id = 'workspace-recency-order'
 export const title = 'Workspace recency order'
-export const description = 'Visually reorder workspace groups and their session rows by most recent activity.'
+export const description = 'Visually reorder workspace groups and their session rows by most recent activity, collapse workspaces idle for 24 hours, and label how long ago each was last active.'
 export const hasGear = false
 /** Settings-row copy, assembled into the `ux-plus-settings` namespace. */
 export const settingsMessages = {
-  zh: { title: '最近活动排序', description: '最近聊过的工作区和会话自动排到前面，多个项目同时推进也能快速回到刚才的工作。' },
-  en: { title: 'Workspace recency order', description: 'Visually reorder workspace groups and their session rows by most recent activity.' },
+  zh: { title: '最近活动排序', description: '最近聊过的工作区和会话自动排到前面；超过 24 小时没有更新的工作区自动收起（每次打开页面每个工作区最多一次），并在行右侧显示距今未更新的时间标。' },
+  en: { title: 'Workspace recency order', description: 'Visually reorder workspace groups and their session rows by most recent activity, collapse workspaces idle for 24 hours, and label how long ago each was last active.' },
 }
 
 // ---------------------------------------------------------------------------
@@ -171,6 +179,83 @@ function latestSessionUpdate(workspace, byId) {
     if (session.updatedAt > latest) latest = session.updatedAt
   }
   return latest
+}
+
+// ---------------------------------------------------------------------------
+// Idle sub-behavior (same switch, same activity signal as the group layer):
+//   - a workspace whose latest real activity is older than 24 hours collapses
+//     automatically — at most once per workspace per page load, so a manual
+//     re-expand is never fought;
+//   - every workspace row with real activity carries an age label on its
+//     right ("how long since this workspace was last updated"), rendered
+//     exactly like the host's session-row time cell (10px/16px,
+//     `--dsw-alias-label-tertiary`, hidden while the row is hovered or its
+//     menu is open, where the action buttons take the space).
+// Workspace rows are the divs carrying `data-row-key="workspace:<id>"`
+// (Rows.tsx:245; the group key IS the workspaceId, tree.ts:26-32; the
+// ungrouped bucket's key is '' and is skipped). Each row is role="treeitem"
+// with aria-expanded and onClick={onToggle} (Rows.tsx:247-248), so a
+// programmatic click() toggles the group through the host's own handler —
+// this feature never touches the persisted view store.
+// ---------------------------------------------------------------------------
+
+/** Idle threshold: no real activity for 24 hours. */
+const IDLE_MS = 24 * 60 * 60 * 1000
+
+/** Label refresh cadence on an otherwise idle page (ms). */
+const AGE_TICK_MS = 60 * 1000
+
+/** `data-row-key` prefix of workspace rows (Rows.tsx:245). */
+const ROW_PREFIX = 'workspace:'
+
+/** Marker attribute carried by the injected label element. */
+const LABEL_ATTR = 'data-dsh-ux-plus'
+const LABEL_VALUE = 'workspace-age'
+
+/** Host session-time buckets (locales.ts): 60s / 60m / 24h / 30d / 12mo. */
+const MINUTE_MS = 60 * 1000
+const HOUR_MS = 60 * MINUTE_MS
+const DAY_MS = 24 * HOUR_MS
+const MONTH_MS = 30 * DAY_MS
+const YEAR_MS = 12 * MONTH_MS
+
+/**
+ * Host-shaped relative age ("多久没更新" label text).
+ * @param {string} locale - active locale id ('zh' prefix wins, else en).
+ * @param {number} ageMs - now - latest activity (ms, clamped at 0).
+ * @returns {string} label text, e.g. '3小时' / '2d'.
+ */
+export function ageLabel(locale, ageMs) {
+  const age = Math.max(0, ageMs)
+  const zh = typeof locale === 'string' && locale.toLowerCase().startsWith('zh')
+  if (age < MINUTE_MS) return zh ? '刚刚' : 'now'
+  if (age < HOUR_MS) return zh ? `${Math.floor(age / MINUTE_MS)}分钟` : `${Math.floor(age / MINUTE_MS)}m`
+  if (age < DAY_MS) return zh ? `${Math.floor(age / HOUR_MS)}小时` : `${Math.floor(age / HOUR_MS)}h`
+  if (age < MONTH_MS) return zh ? `${Math.floor(age / DAY_MS)}天` : `${Math.floor(age / DAY_MS)}d`
+  if (age < YEAR_MS) return zh ? `${Math.floor(age / MONTH_MS)}个月` : `${Math.floor(age / MONTH_MS)}mo`
+  return zh ? `${Math.floor(age / YEAR_MS)}年` : `${Math.floor(age / YEAR_MS)}y`
+}
+
+/** The injected age label among a row's direct children, or null. */
+function findAgeLabel(row) {
+  for (const child of row.children) {
+    if (child.dataset && child.dataset.dshUxPlus === LABEL_VALUE) return child
+  }
+  return null
+}
+
+/** The host row's actions span (the label sits before it), or null. */
+function findRowActions(row) {
+  for (const child of row.children) {
+    if (typeof child.className === 'string' && child.className.includes('rowActions')) return child
+  }
+  return null
+}
+
+/** Remove this feature's age label from a row (idempotent). */
+function removeAgeLabel(row) {
+  const label = findAgeLabel(row)
+  if (label !== null) label.remove()
 }
 
 /**
@@ -846,7 +931,31 @@ export function client(ctx, deps) {
 
   const styles = makeStyleCache()
   let timer = null
+  let ageTimer = null
   let disposed = false
+  /** Workspace ids already auto-collapsed during this page load. */
+  const collapsedOnce = new Set()
+
+  // Hover/menu dismissal mirroring the host's `.sessionRow:hover .time`
+  // rule (Rows.module.css:279-282): the action buttons take the space.
+  const styleTag = document.createElement('style')
+  styleTag.dataset.dshUxPlus = 'idle-collapse-css'
+  styleTag.textContent =
+    `[data-row-key^="${ROW_PREFIX}"]:hover > [${LABEL_ATTR}="${LABEL_VALUE}"],`
+    + `[data-row-key^="${ROW_PREFIX}"].menuOpen > [${LABEL_ATTR}="${LABEL_VALUE}"] { display: none; }`
+  document.head.appendChild(styleTag)
+
+  /** Active locale id for the age labels, defensively ('zh' when absent). */
+  function activeLocale() {
+    const locale = ctx && ctx.locale
+    if (locale && typeof locale.getSnapshot === 'function') {
+      try {
+        const snapshot = locale.getSnapshot()
+        if (snapshot && typeof snapshot.active === 'string') return snapshot.active
+      } catch { /* fall through to the default */ }
+    }
+    return 'zh'
+  }
 
   /** Snapshot the live lists; null while either list is not ready. */
   function readData() {
@@ -927,12 +1036,56 @@ export function client(ctx, deps) {
     orderLevel(found.tree, roots, true, data, view)
   }
 
+  /**
+   * Idle sub-behavior pass: label every workspace row with activity and
+   * collapse idle ones once. Independent of the reorder (a bail-out there
+   * never suppresses labels here); shares the same debounced schedule.
+   */
+  function idlePass() {
+    const data = readData()
+    if (data === null) return
+    const rows = document.querySelectorAll(`[data-row-key^="${ROW_PREFIX}"]`)
+    const now = Date.now()
+    const locale = activeLocale()
+    for (const row of rows) {
+      const rowKey = row.getAttribute('data-row-key')
+      const workspaceId = typeof rowKey === 'string' ? rowKey.slice(ROW_PREFIX.length) : ''
+      const workspace = workspaceId === UNGROUPED_KEY
+        ? undefined
+        : data.items.find((item) => item.workspaceId === workspaceId)
+      if (workspace === undefined) { removeAgeLabel(row); continue }
+      const latest = latestSessionUpdate(workspace, data.byId)
+      if (latest === Number.NEGATIVE_INFINITY) { removeAgeLabel(row); continue }
+      const idle = now - latest > IDLE_MS
+      let label = findAgeLabel(row)
+      if (label === null) {
+        label = document.createElement('span')
+        label.dataset.dshUxPlus = LABEL_VALUE
+        label.style.flex = 'none'
+        label.style.fontSize = '10px'
+        label.style.lineHeight = '16px'
+        label.style.color = 'var(--dsw-alias-label-tertiary, #8a8f98)'
+        label.style.pointerEvents = 'none'
+        label.style.whiteSpace = 'nowrap'
+        const actions = findRowActions(row)
+        if (actions !== null && typeof row.insertBefore === 'function') row.insertBefore(label, actions)
+        else row.appendChild(label)
+      }
+      label.textContent = ageLabel(locale, now - latest)
+      if (idle && !collapsedOnce.has(workspaceId)) {
+        collapsedOnce.add(workspaceId)
+        if (row.getAttribute('aria-expanded') === 'true' && typeof row.click === 'function') row.click()
+      }
+    }
+  }
+
   function schedule() {
     if (disposed || timer !== null) return
     timer = window.setTimeout(function () {
       timer = null
       if (disposed) return
       reorder()
+      idlePass()
     }, 0)
   }
 
@@ -940,6 +1093,10 @@ export function client(ctx, deps) {
   if (document.body !== null) observer.observe(document.body, { childList: true, subtree: true })
   const disposeSessions = sessions.subscribe(schedule)
   const disposeWorkspaces = workspaces.subscribe(schedule)
+  const locale = ctx && ctx.locale
+  const disposeLocale = locale && typeof locale.subscribe === 'function' ? locale.subscribe(schedule) : null
+  // Age labels must age on an otherwise idle page (no store traffic).
+  if (typeof window.setInterval === 'function') ageTimer = window.setInterval(schedule, AGE_TICK_MS)
   schedule()
 
   // No ctx.effect: this feature owns its resources and hands back the exact
@@ -949,9 +1106,13 @@ export function client(ctx, deps) {
   return function cleanup() {
     disposed = true
     if (timer !== null) window.clearTimeout(timer)
+    if (ageTimer !== null && typeof window.clearInterval === 'function') window.clearInterval(ageTimer)
     observer.disconnect()
     disposeSessions()
     disposeWorkspaces()
+    if (typeof disposeLocale === 'function') disposeLocale()
+    for (const row of document.querySelectorAll(`[data-row-key^="${ROW_PREFIX}"]`)) removeAgeLabel(row)
+    styleTag.remove()
     styles.clear()
   }
 }

@@ -67,6 +67,8 @@ function makeEnv() {
   }
   env.document = {
     body: makeElement('body'),
+    head: makeElement('head'),
+    createElement: (tag) => makeElement(tag),
     querySelectorAll: () => [],
     addEventListener: (type, fn) => { (env.listeners[type] ??= []).push(fn) },
     removeEventListener: (type, fn) => {

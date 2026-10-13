@@ -1,8 +1,8 @@
 /**
- * D5 switch engine of dsh-ux-plus: mounts/disposes the six feature clients
+ * D5 switch engine of dsh-ux-plus: mounts/disposes the five feature clients
  * to match the `ux-plus` section value, immediately and reversibly.
  *
- * This module is deliberately React-free (only the six feature modules
+ * This module is deliberately React-free (only the five feature modules
  * are imported, which are themselves host-safe): it can be exercised in
  * plain Node tests without a browser. The browser half (src/client.js)
  * supplies React and the scopes; the row rendering stays there.
@@ -24,7 +24,6 @@ import { feature as workspaceSessionMenu } from '../features/workspace-session-m
 import { feature as workspaceRecencyOrder } from '../features/workspace-recency-order/src/index.js'
 import { feature as toolAskQuestionExpanded } from '../features/tool-ask-question-expanded/src/index.js'
 import { feature as workspaceSessionInherit } from '../features/workspace-session-inherit/src/index.js'
-import { feature as workspaceIdleCollapse } from '../features/workspace-idle-collapse/src/index.js'
 
 /** Feature modules in tab row order (frozen ids). */
 export const FEATURES = [
@@ -33,7 +32,6 @@ export const FEATURES = [
   workspaceRecencyOrder,
   toolAskQuestionExpanded,
   workspaceSessionInherit,
-  workspaceIdleCollapse,
 ]
 
 /** Locale namespace carrying the settings-tab copy (registered by client.js). */
