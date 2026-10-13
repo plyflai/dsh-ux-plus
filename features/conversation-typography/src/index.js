@@ -31,6 +31,11 @@ export const id = 'conversation-typography'
 export const title = 'Conversation typography'
 export const description = 'Conversation font size and width for the chat area.'
 export const hasGear = false
+/** Settings-row copy, assembled into the `ux-plus-settings` namespace. */
+export const settingsMessages = {
+  zh: { title: '对话字号与宽度', description: '选择舒服的字号和阅读宽度，长篇回答看得更轻松，不用放大整个界面。' },
+  en: { title: 'Conversation typography', description: 'Conversation font size and width for the chat area.' },
+}
 
 /** Settings namespace owned by this feature (legacy dsh-ui-tweak, unchanged). */
 export const UI_TWEAK_NAMESPACE = 'ui-tweak'
@@ -290,6 +295,7 @@ export const feature = {
   title,
   description,
   hasGear,
+  settingsMessages,
   host: (ctx) => attach(ctx),
   client: (ctx, deps) => client(ctx, deps),
 }

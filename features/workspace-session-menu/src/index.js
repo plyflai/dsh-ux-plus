@@ -3,6 +3,11 @@ export const id = 'workspace-session-menu'
 export const title = 'Session ID menu'
 export const description = 'Add a "Session ID" copy item to session row menus.'
 export const hasGear = false
+/** Settings-row copy, assembled into the `ux-plus-settings` namespace. */
+export const settingsMessages = {
+  zh: { title: '复制会话 ID', description: '在会话菜单里一键拿到会话 ID，方便续接会话、定位记录或排查问题。' },
+  en: { title: 'Session ID menu', description: 'Add a "Session ID" copy item to session row menus.' },
+}
 const NS = 'ux-plus-session-menu'
 
 function legacyCopy(text) {
@@ -65,4 +70,4 @@ export function client(ctx, deps) {
 export function attach() { return () => {} }
 /** Host companion; no retained resources. */
 export function dispose() {}
-export const feature = { id, title, description, hasGear, host: attach, client }
+export const feature = { id, title, description, hasGear, settingsMessages, host: attach, client }

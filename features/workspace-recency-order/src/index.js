@@ -77,6 +77,11 @@ export const id = 'workspace-recency-order'
 export const title = 'Workspace recency order'
 export const description = 'Visually reorder workspace groups and their session rows by most recent activity.'
 export const hasGear = false
+/** Settings-row copy, assembled into the `ux-plus-settings` namespace. */
+export const settingsMessages = {
+  zh: { title: '最近活动排序', description: '最近聊过的工作区和会话自动排到前面，多个项目同时推进也能快速回到刚才的工作。' },
+  en: { title: 'Workspace recency order', description: 'Visually reorder workspace groups and their session rows by most recent activity.' },
+}
 
 // ---------------------------------------------------------------------------
 // Client-side behavior.
@@ -984,6 +989,7 @@ export const feature = {
   title,
   description,
   hasGear,
+  settingsMessages,
   host: (ctx) => attach(ctx),
   client: (ctx, deps) => client(ctx, deps),
 }

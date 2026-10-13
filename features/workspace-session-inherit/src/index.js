@@ -3,6 +3,11 @@ export const id = 'workspace-session-inherit'
 export const title = 'Inherit conversation'
 export const description = 'Add an "Inherit conversation" item that opens a fresh session with a chosen model to summarize the clicked conversation.'
 export const hasGear = false
+/** Settings-row copy, assembled into the `ux-plus-settings` namespace. */
+export const settingsMessages = {
+  zh: { title: '继承对话', description: '在会话菜单里选一个模型，当前工作区开一个新会话，让新模型读原会话的进度接着往下走。' },
+  en: { title: 'Inherit conversation', description: 'Add an "Inherit conversation" item that opens a fresh session with a chosen model to summarize the clicked conversation.' },
+}
 const NS = 'ux-plus-session-inherit'
 
 const MESSAGES = {
@@ -296,4 +301,4 @@ export function client(ctx, deps) {
 export function attach() { return () => {} }
 /** Host companion; no retained resources. */
 export function dispose() {}
-export const feature = { id, title, description, hasGear, host: attach, client }
+export const feature = { id, title, description, hasGear, settingsMessages, host: attach, client }

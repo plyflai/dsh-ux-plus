@@ -355,12 +355,37 @@ test('the ux-plus switch keys are exactly the five frozen feature ids', async ()
     assert.equal(typeof feature.title, 'string')
     assert.equal(typeof feature.host, 'function')
     assert.equal(typeof feature.client, 'function')
+    for (const lang of ['zh', 'en']) {
+      assert.equal(typeof feature.settingsMessages?.[lang]?.title, 'string', `${name} ${lang} title`)
+      assert.ok(feature.settingsMessages[lang].title.length > 0, `${name} ${lang} title`)
+      assert.equal(typeof feature.settingsMessages?.[lang]?.description, 'string', `${name} ${lang} description`)
+      assert.ok(feature.settingsMessages[lang].description.length > 0, `${name} ${lang} description`)
+    }
   }
   const host = await import(new URL('src/index.js', root).href)
   const ctx = {}
   const dispose = host.apply(ctx)
   assert.deepEqual(Object.keys(host.Config({}).get()).sort(), [...FROZEN].sort())
   dispose()
+})
+
+test('buildSettingsMessages covers every feature id in zh and en', async () => {
+  const { FEATURES, SETTINGS_NAMESPACE, buildSettingsMessages } = await import(new URL('src/switches.js', root).href)
+  assert.equal(SETTINGS_NAMESPACE, 'ux-plus-settings')
+  const dict = buildSettingsMessages(FEATURES)
+  assert.deepEqual(Object.keys(dict).sort(), ['en', 'zh'])
+  for (const lang of ['zh', 'en']) {
+    assert.deepEqual(
+      Object.keys(dict[lang]).sort(),
+      FEATURES.flatMap((f) => [`${f.id}.title`, `${f.id}.description`]).sort(),
+    )
+    for (const feature of FEATURES) {
+      // zh rows are localized; en rows keep the frozen English constants.
+      assert.notEqual(dict.zh[`${feature.id}.title`], '', `zh title ${feature.id}`)
+      assert.equal(dict.en[`${feature.id}.title`], feature.title)
+      assert.equal(dict.en[`${feature.id}.description`], feature.description)
+    }
+  }
 })
 
 test('source imports use declared dependencies, shell seeds, or relative paths', async () => {

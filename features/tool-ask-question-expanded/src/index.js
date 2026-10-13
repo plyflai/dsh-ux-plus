@@ -53,6 +53,11 @@ export const id = 'tool-ask-question-expanded'
 export const title = 'Ask question expanded'
 export const description = 'Reveal the question and its answer in the chat flow by default.'
 export const hasGear = false
+/** Settings-row copy, assembled into the `ux-plus-settings` namespace. */
+export const settingsMessages = {
+  zh: { title: '提问结果默认展开', description: '提问结束后，问题和答案直接展开，回看决定少一次点击。' },
+  en: { title: 'Ask question expanded', description: 'Reveal the question and its answer in the chat flow by default.' },
+}
 
 /** Chat-flow ask-question rows (W-1): the host's own tool card rows. */
 const ROW_SELECTOR = '[data-conversation-scroll] [data-tool="ask_user_question"]'
@@ -266,6 +271,7 @@ export const feature = {
   title,
   description,
   hasGear,
+  settingsMessages,
   host: (ctx) => attach(ctx),
   client: (ctx, deps) => client(ctx, deps),
 }

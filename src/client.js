@@ -27,7 +27,21 @@
  */
 import * as React from 'react'
 import { MenuItemButton, IconCopyOutlineRegular, IconRightUpOutlineRegular } from '@deepseek-ai/dsh-client-ui-primitives'
-import { FEATURES, mountFeatures } from './switches.js'
+import { FEATURES, SETTINGS_NAMESPACE, buildSettingsMessages, mountFeatures } from './switches.js'
+
+/** Settings-tab locale dictionary (`<id>.title` / `<id>.description` per lang). */
+const SETTINGS_MESSAGES = buildSettingsMessages(FEATURES)
+
+/**
+ * Resolve a settings-row string through the slot-injected `t` seat, falling
+ * back to the feature's English constant when `t` is absent (tests, older
+ * shells) or the key is missing.
+ */
+function text(t, key, fallback) {
+  if (typeof t !== 'function') return fallback
+  const value = t(key)
+  return typeof value === 'string' && value !== key ? value : fallback
+}
 
 /**
  * Cordis services this entry injects (hard dependencies). `sessions` and
@@ -116,6 +130,10 @@ function UxPlusTab(props) {
     setSnapshot(scope.getSnapshot())
   }), [scope])
   const value = (snapshot && snapshot.value) || {}
+  // `t` is the standard locale seat the slot renderer injects because the
+  // registration declares `locale: SETTINGS_NAMESPACE`; it re-derives on
+  // active-locale change, so rows follow the DSH language live.
+  const t = props.t
   return React.createElement('div', {
     'data-dsh-ux-plus': 'tab',
     // Invisible diagnostics: the bound snapshot's persistence mode (loopback
@@ -126,6 +144,7 @@ function UxPlusTab(props) {
   },
     FEATURES.map((feature) => {
       const on = value[feature.id] !== false
+      const title = text(t, `${feature.id}.title`, feature.title)
       return React.createElement('div', {
         key: feature.id,
         'data-dsh-ux-plus-item': feature.id,
@@ -134,11 +153,11 @@ function UxPlusTab(props) {
         React.createElement('div', {
           style: { display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0 },
         },
-          React.createElement('span', { style: { fontSize: 14, color: 'var(--dsw-alias-label-primary)' } }, feature.title),
-          React.createElement('span', { style: { fontSize: 12, color: 'var(--dsw-alias-label-secondary)' } }, feature.description)),
+          React.createElement('span', { style: { fontSize: 14, color: 'var(--dsw-alias-label-primary)' } }, title),
+          React.createElement('span', { style: { fontSize: 12, color: 'var(--dsw-alias-label-secondary)' } }, text(t, `${feature.id}.description`, feature.description))),
         React.createElement(Switch, {
           checked: on,
-          label: feature.title,
+          label: title,
           onChange: (next) => {
             // A failed write must not surface as an unhandled promise
             // rejection (console PAGEERROR); the subscription re-renders the
@@ -177,6 +196,12 @@ export function apply(ctx) {
 
   const offFeatures = mountFeatures(ctx, deps, uxScope)
 
+  // Settings-tab copy: one namespace assembled from every feature's
+  // `settingsMessages`, registered on the plugin fiber (survives tab
+  // unmounts). The slot registration below declares it as `locale`, so the
+  // renderer injects a live `t` into UxPlusTab.
+  const offLocale = ctx.effect(() => ctx.locale.register(SETTINGS_NAMESPACE, SETTINGS_MESSAGES))
+
   // The section: registered into the settings shell's outer-left column as
   // its own top-level entry (slot settings.section, plan W-7).
   const offSection = ctx.slots.inject('settings.section', () => ctx.slots.register({
@@ -184,11 +209,13 @@ export function apply(ctx) {
     id: 'ux-plus',
     order: 100,
     label: () => 'UX Plus',
+    locale: SETTINGS_NAMESPACE,
     inject: () => ({ scope: uxScope }),
   }, UxPlusTab))
 
   return () => {
     offSection()
+    offLocale()
     offFeatures()
   }
 }

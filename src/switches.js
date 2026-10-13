@@ -34,6 +34,31 @@ export const FEATURES = [
   workspaceSessionInherit,
 ]
 
+/** Locale namespace carrying the settings-tab copy (registered by client.js). */
+export const SETTINGS_NAMESPACE = 'ux-plus-settings'
+
+/**
+ * Assemble the `ux-plus-settings` locale dictionary from the features' own
+ * `settingsMessages` ({ zh: {title, description}, en: {...} }): flat keys
+ * `<feature id>.title` / `<feature id>.description` per language, so the
+ * settings tab renders every row through the host `t` seat and follows the
+ * active DSH locale.
+ * @param {Array<{id: string, settingsMessages?: object}>} features
+ * @returns {{zh: object, en: object}}
+ */
+export function buildSettingsMessages(features) {
+  const dict = { zh: {}, en: {} }
+  for (const feature of features) {
+    const messages = feature.settingsMessages || {}
+    for (const lang of ['zh', 'en']) {
+      const entry = messages[lang] || {}
+      dict[lang][`${feature.id}.title`] = entry.title ?? feature.title
+      dict[lang][`${feature.id}.description`] = entry.description ?? feature.description
+    }
+  }
+  return dict
+}
+
 /**
  * @param {object} ctx - the client plugin context (features use `ctx.slots`).
  * @param {object} deps - { react, tweakScope, sessions, workspaces } (see
