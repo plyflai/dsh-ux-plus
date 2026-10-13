@@ -1,111 +1,101 @@
 # dsh-ux-plus
 
-让 DeepSeek Harness 变得更顺手的各种 UX 增强与功能插件。
+UX enhancements and quality-of-life plugins that make DeepSeek Harness easier to handle.
 
 [![CI](https://github.com/plyflai/dsh-ux-plus/actions/workflows/ci.yml/badge.svg)](https://github.com/plyflai/dsh-ux-plus/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
-**当前适配：[DeepSeek Harness 0.2.0-rc.1](https://github.com/deepseek-ai/deepseek-harness/releases/tag/dsh-v0.2.0-rc.1) 的 Web 界面。**
+**English** · [简体中文](./README.zh-CN.md)
 
-## 功能
+**Currently targeting the Web UI of [DeepSeek Harness 0.2.0-rc.1](https://github.com/deepseek-ai/deepseek-harness/releases/tag/dsh-v0.2.0-rc.1).**
 
-| 功能 | 用起来有什么好处 |
-| --- | --- |
-| 对话字号与宽度 | **【一键切换】** 选择舒服的字号和阅读宽度。长篇回答看得更轻松，宽屏也能充分利用，不用放大整个界面。 |
-| 复制会话 ID | **【随手复制】** 在会话菜单里一键拿到会话 ID，方便指定会话继续协作、定位记录或排查问题，省去手动翻找和选中文字。 |
-| 最近活动排序 | **【快速找回 + 自动瘦身】** 最近聊过的工作区和会话自动排到前面；一天多没动的工作区自己收起，行右侧标出多久没更新，一眼只剩正在推进的项目。 |
-| 提问结果默认展开 | **【回看更省事】** 提问结束后，问题和答案直接展开。检查决定、接着讨论时，少一次点击，也少一次找答案。 |
-| 继承对话 | **【换个模型接着聊】** 在会话菜单里选一个模型，当前工作区立刻开一个新会话，让新模型读原会话的进度接着往下走。 |
+## Features
 
-## 功能详解
+| Feature | Why you'll like it | Preview |
+| --- | --- | --- |
+| Conversation typography | **[One-click comfort]** Pick a comfortable font size and reading width for the chat area. Long answers read easier, wide screens get used properly — without zooming the whole interface. | <img src="docs/images/typography.png" width="300" alt="Chat area rendering"> |
+| Session ID menu | **[Grab it in one click]** Copy a session's ID straight from its row menu — for `--session` resumes, locating records, or debugging, with no manual text selection. | <img src="docs/images/session-menu.png" width="200" alt="Session row menu"> |
+| Workspace recency order | **[Jump back + auto-tidy]** Freshest workspaces and sessions float to the top; workspaces idle for over a day collapse on their own and show how long ago they were last updated. | <img src="docs/images/idle-collapse.png" width="200" alt="Workspace age labels"> |
+| Ask question expanded | **[Fewer clicks on review]** When a question finishes, the question and its answer stay expanded — checking a decision costs one less click. | — |
+| Inherit conversation | **[Switch models, keep going]** Pick a model in the session menu: a brand-new session in the current workspace reads the old conversation's progress and carries on. | <img src="docs/images/inherit-picker.png" width="200" alt="Model picker popover"> |
 
-### 对话字号与宽度
+## Feature details
 
-对话区字号默认 14px，长回答密集时可以在 **设置 → 通用 → 对话区** 单独调大字号、收窄阅读宽度——只作用于会话内容，不改整个界面。
+### Conversation typography
 
-![对话区渲染效果](docs/images/typography.png)
+The chat area defaults to 14px. When answers get dense, bump the font size and narrow the reading width under **Settings → General → Chat area** — it only affects conversation content, never the whole interface.
 
-### 会话菜单：复制会话 ID 与继承对话
+### Session menu: Session ID & Inherit conversation
 
-每个会话行右侧的三点菜单里，本插件追加两项（位于置顶、重命名等原生项之前）：
+Each session row's overflow menu gains two items (placed before the native Pin / Rename entries):
 
-![会话三点菜单](docs/images/session-menu.png)
+- **Session ID**: copies the session's ID to the clipboard — for `--session` resumes, log digging and similar workflows.
+- **Inherit conversation**: see below.
 
-- **会话 ID**：点击即把该会话的 ID 复制到剪贴板，用于 `--session` 续接、日志定位等场景。
-- **继承对话**：见下。
+### Inherit conversation
 
-### 继承对话
+Clicking "Inherit conversation" opens a lightweight model picker at the click position, listing every routable model (grouped by provider):
 
-点击「继承对话」后，会在点击位置弹出一个轻量的模型选择浮层，列出当前可路由的全部模型（按提供方分组）：
+After you pick a model, the plugin:
 
-![继承对话的模型选择浮层](docs/images/inherit-picker.png)
+1. creates a brand-new session **in the original session's workspace**;
+2. switches the new session to the model you just picked;
+3. posts an inheritance prompt — the inherited session's ID plus "Summarize and inherit this conversation's progress, giving the most attention to the latest turns";
+4. jumps to the new session, where the model starts reading the old conversation, summarizing progress and carrying on.
 
-选定模型后，插件会：
+Great for: a session that ran too long and deserves a pricier model to finish; a rate-limited provider where you want to continue elsewhere; or simply transplanting progress into another model's context. The original session is untouched, and the Session ID copy stays as-is.
 
-1. 在**原会话所属的工作区**里创建一个全新会话；
-2. 把新会话的模型切换为刚选中的那个；
-3. 向新会话投递一条继承提示词——内容是被继承会话的 session ID，加上「总结并继承这个对话的进度，越近轮次的对话所投放的注意力要越多」；
-4. 自动跳转到新会话，模型开始读旧会话、输出进度总结并接着推进。
+### Workspace recency order (incl. idle collapse)
 
-适合这些场景：一个会话跑得太长想换个更贵的模型收尾；某个提供方限流想换条路继续；或者单纯想把进展"移植"到另一个模型的上下文里。原会话完全不受影响，「会话 ID」复制也原样保留。
+Workspace groups and their session rows sort by most recent activity, so multiple parallel projects never bury the one you were just in; only the visual order changes — the host's sort settings and data stay intact.
 
-### 最近活动排序（含闲置收起）
+The same feature also handles **idle tidying**: a workspace with no real activity for over **24 hours** (blank and subagent sessions don't count — same signal as the ordering) collapses automatically once when the page opens, and every workspace row shows its age on the right — now / Nm / Nh / Nd / Nmo / Ny — styled exactly like the host's session-row timestamps and hidden on hover.
 
-最近聊过的工作区分组和组内会话自动排到前面，多个项目同时推进也能快速回到刚才的工作；只改视觉顺序，宿主的排序设置与数据不动。
+Auto-collapse fires at most once per workspace per page load: re-expand it manually and it stays expanded. Workspaces without sessions (or with only blank / subagent sessions) have no activity signal — never labeled, never collapsed. Labels follow the DSH language and light/dark theme.
 
-同一个功能还负责**闲置瘦身**：工作区超过 **24 小时**没有任何实际活动（空会话与子代理会话不算，与排序同一口径）后，会在打开页面时自动收起一次；同时每个工作区行右侧显示距今未更新的时间标——刚刚 / N分钟 / N小时 / N天 / N个月 / N年，样式与宿主会话行的时间完全一致，悬停时让位给操作按钮：
+### Settings
 
-![闲置工作区收起与时间标](docs/images/idle-collapse.png)
+Open **Settings → UX Plus**: all five features have independent switches, on by default, applied instantly.
 
-自动收起对每个工作区每次打开页面最多触发一次：手动重新展开后，不会再被反复收起。没有会话（或只有空会话 / 子代理会话）的工作区没有活动信号，不打标、不收起。时间标跟随 DSH 语言与明暗主题。
+![UX Plus settings](docs/images/settings.png)
 
-### 设置
+## Install
 
-安装后打开 **设置 → UX Plus**，五项功能各自独立开关，默认全部开启，切换即时生效：
-
-![UX Plus 设置页](docs/images/settings.png)
-
-## 安装
-
-需要 Node.js ≥ 22、PATH 中的 pnpm，以及一个 DSH Web profile。
+Requires Node.js ≥ 22, pnpm on PATH, and a DSH Web profile.
 
 ```bash
 dsh plugin --profile <name> add github:plyflai/dsh-ux-plus
 ```
 
-安装后重启该 profile。打开 **设置 → UX Plus**，即可按需开关各项功能。功能默认开启，单项开关即时生效。
+Restart the profile afterwards. Open **Settings → UX Plus** to toggle each feature; features are on by default and each switch applies instantly.
 
-对话字号和宽度在 **设置 → 通用 → 对话区** 调整。
+Conversation font size and width live under **Settings → General → Chat area**.
 
-## 兼容性
+## Compatibility
 
-- 仅面向 DSH 的 **Web 界面**（浏览器），不适用于终端 TUI。
-- 所有功能都是宿主公开扩展点（侧边栏插槽、设置表单、DOM 微调）上的挂载，不修改宿主源码；任何一项都可以在设置里单独关闭。
-- 宿主升级可能调整内部 DOM 与插槽契约；如遇失效请提 issue，通常会随版本跟进。
+- Web UI (browser) only — not the terminal TUI.
+- Every feature mounts on public host extension points (sidebar slots, settings forms, DOM tweaks); no host source is modified, and each feature can be switched off individually.
+- Host upgrades may shift internal DOM and slot contracts; file an issue if something breaks and it usually gets fixed in the next version.
 
-## 开发
+## Development
 
 ```bash
 npm install
-npm test        # node --test，含构建产物与注入依赖的静态断言
-npm run build   # tsdown 产出 lib/client.js（经典脚本，随仓库提交）
+npm test        # node --test, incl. static assertions on the built artifact and injected deps
+npm run build   # tsdown emits lib/client.js (classic script, committed to the repo)
 ```
 
-- 每个功能是一个 `features/<name>/` 私有模块（host + client 两半），在 `src/index.js` 与 `src/switches.js` 的功能清单里注册，不是独立插件。
-- 客户端资源打包为单个经典脚本注入 `window.__ModuleLoader__`，外部依赖被严格限制在宿主提供的模块种子内，构建脚本会校验。
-- 每次推送到 main 会在下方更新记录追加一条，并同步 [CHANGELOG.md](CHANGELOG.md)。
+- Each feature is a private `features/<name>/` module (host + client halves) registered in the feature lists of `src/index.js` and `src/switches.js` — not a standalone plugin.
+- The client bundles into a single classic script injected into `window.__ModuleLoader__`; external dependencies are strictly limited to the module seeds the host provides, enforced by the build script.
+- Every push to main appends one entry to the update log below and syncs [CHANGELOG.md](CHANGELOG.md).
 
-## 更新记录
+## Update log
 
-每次推送到 main 在此追加一条，最新在上；完整历史见 [CHANGELOG.md](CHANGELOG.md)。
+The three most recent entries; full history in [CHANGELOG.md](CHANGELOG.md).
 
-- **v0.1.6 · 2026-10-14** — 「闲置工作区收起」不再是独立功能：收起与时间标并入「最近活动排序」（同一开关、同一活动口径），设置页回到五项。
-- **v0.1.5 · 2026-10-14** — 新增 24 小时无活动工作区自动收起 + 工作区行距今未更新时间标（刚刚 / N分钟 / N小时 / N天 / N个月 / N年，与宿主会话行时间同款式、同明暗主题、跟随语言）。
-- **v0.1.4 · 2026-10-13** — UX Plus 设置页文案跟随 DSH 语言：功能行的标题与说明中英双语、切换语言即时生效（分区名 UX Plus 保持品牌名）。
-- **v0.1.3 · 2026-10-12** — 新功能「继承对话」：会话行三点菜单里选一个模型，当前工作区开一个新会话，让选中的模型总结被继承的会话并接着推进（越近的轮次注意力越高），不覆盖原有的复制会话 ID；浮层跟随明暗主题（宿主 `--dsw-alias-bg-layer-2` / `--dsw-alias-border-l2` 变量 + 悬停高亮）；README 增加功能详解与界面截图。
-- **v0.1.2 · 2026-10-12** — 提问展开样式收敛：浅蓝只保留问答卡片一层（去掉外层行铺底）；答案白色，原始问题字号略小、颜色略灰。
-- **v0.1.1 · 2026-10-11** — 提问块改用通知蓝；修复组内会话行排序在手动排序/筛选下静默失效；修复折叠分组配额导致的行层整段失效。
-- **v0.1.0 · 2026-10-09** — 首个版本：对话字号与宽度、复制会话 ID、最近活动排序、提问结果默认展开。
+- **v0.1.7 · 2026-10-14** — README restructured: English-first with a [Chinese counterpart](./README.zh-CN.md), screenshots moved into the feature table, update log trimmed to the three latest entries.
+- **v0.1.6 · 2026-10-14** — Idle workspace collapse and age labels are no longer a standalone feature: folded into Workspace recency order (same switch, same activity signal); settings back to five rows.
+- **v0.1.5 · 2026-10-14** — Workspaces idle for 24 hours auto-collapse (at most once per page load); workspace rows show a host-styled "last updated" age label that follows the DSH language and theme.
 
 ## License
 
