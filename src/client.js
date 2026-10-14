@@ -58,8 +58,14 @@ function text(t, key, fallback) {
  * inherit-conversation feature (model catalog / selectModel / prompt remotes;
  * same declaration as the host's own `ui-open-in-app` client,
  * packages/client/ui-open-in-app/src/client/index.ts:39).
+ * `uiSession` is declared for the workspace-recency-order feature's liveness
+ * layer: its `sessionStatus` observable is the only source of the sidebar's
+ * three status indicators (running / pending interaction / unread completion,
+ * packages/client/ui-session/src/client/index.ts:292-298). Declaring it means
+ * activation also waits for the ui-session provider; the feature still
+ * degrades gracefully if the service or its observable is missing.
  */
-export const inject = ['slots', 'locale', 'configForms', 'sessions', 'workspaces', 'remote', 'remote.session']
+export const inject = ['slots', 'locale', 'configForms', 'sessions', 'workspaces', 'uiSession', 'remote', 'remote.session']
 
 /**
  * Self-contained toggle switch built only on the `react` seed.
@@ -192,6 +198,12 @@ export function apply(ctx) {
     tweakScope,
     sessions: ctx.get('sessions'),
     workspaces: ctx.get('workspaces'),
+    // Liveness (sidebar status indicators) for the recency-order feature: the
+    // ui-session service exposes `sessionStatus` (a read-only observable of
+    // {running, pendingInteraction, completionUnread} per session). Missing on
+    // an older surface ⇒ the feature's liveness layer stays off and the
+    // ordering degrades to the recency-only behavior it had before.
+    uiSession: ctx.get('uiSession'),
   }
 
   const offFeatures = mountFeatures(ctx, deps, uxScope)

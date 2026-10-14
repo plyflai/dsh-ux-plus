@@ -79,16 +79,60 @@
  * overflow button last), with flex-shrink pinned to 0 so single-line rows
  * are never compressed (plan G4). Every written style property is cached on
  * first write and fully restored on dispose (plan W-6).
+ *
+ * Liveness layer (same switch, second behavior — the design rationale: recency
+ * is a weak proxy for "active", so attention state overrides time decay, and a
+ * session with a status dot is never made invisible — it only changes address:
+ * full row → micro row → parent badge):
+ *   - tiers (`classifyTier`): pendingInteraction > running > completionUnread
+ *     > recent (age < RECENT_MS, or the current session) > dormant
+ *     (age > DORMANT_MS); the RECENT_MS..DORMANT_MS band is sticky through a
+ *     per-client `tierMemory`, so a clock tick cannot flip a row back and
+ *     forth. The status source is `deps.uiSession.sessionStatus` — the ONE
+ *     authoritative source of the sidebar's three indicators (spinner /
+ *     orange dot / green dot). Without it (degraded mode) the whole liveness
+ *     layer stays off and this feature behaves exactly as it did before the
+ *     layer existed.
+ *   - row ranking: leading rows (the current blank + non-archived pins) keep
+ *     the host's positions; the rest rank by tier, then updatedAt desc, then
+ *     id ascending.
+ *   - density: unread rows shrink to a micro row (paddingBlock 1px, fontSize
+ *     11px, opacity .8 — .55 once older than STALE_UNREAD_MS), non-archived
+ *     dormant rows compact (2px / 11px / .65); every other row is restored to
+ *     full size. Archived rows keep today's treatment exactly (full row,
+ *     recency-ranked, no badge, no pin).
+ *   - fold: a section's dormant rows beyond the first FOLD_AFTER_DORMANT are
+ *     display:none'd — they stay in the DOM, so the row pairing count still
+ *     matches — behind ONE synthetic summary row (`order` 998, before the
+ *     overflow button's 999) whose click reveals them for the rest of the
+ *     page load.
+ *   - attention badge: a workspace header row shows `2 待回复 · 1 未读`
+ *     whenever attention is not fully visible — the section is collapsed
+ *     (every non-blank, non-subagent, non-archived member with pending or
+ *     unread status), or the host narrowed the section (only the attention
+ *     members missing from the replayed slice). Counts always come from the
+ *     data layer (workspace.sessionIds × statusMap), never from counting DOM
+ *     rows: the host does not render collapsed rows beyond its quota.
+ *   - group layer: a workspace with a running or pending member is lifted to
+ *     "now" (it is active right now even if nothing was written for hours) and
+ *     the 24h auto-collapse skips it; an unread completion never lifts a group.
+ *   - anti-churn: while the pointer is inside the tree, or a row menu
+ *     (`.menuOpen`) is open, all writes are deferred behind one dirty flag and
+ *     re-run on pointerout / the next subscription event.
+ *   - FLIP: rows that moved more than 4px are translated back to their old
+ *     position for one frame, then animated over FLIP_MS (best-effort and
+ *     scoped: skipped under prefers-reduced-motion, or where rAF /
+ *     getBoundingClientRect is unavailable — e.g. the test fixtures).
  */
 
 export const id = 'workspace-recency-order'
 export const title = 'Workspace recency order'
-export const description = 'Visually reorder workspace groups and their session rows by most recent activity, collapse workspaces idle for 24 hours, and label how long ago each was last active.'
+export const description = 'Sessions waiting on you and still-running sessions pin to the top of their workspace; finished-but-unread sessions shrink to micro rows; older dormant sessions fold into one summary row; attention hidden by a collapsed workspace shows as a header badge. Workspaces idle for 24 hours still auto-collapse (once per workspace per page load) and every row still carries its last-active age label.'
 export const hasGear = false
 /** Settings-row copy, assembled into the `ux-plus-settings` namespace. */
 export const settingsMessages = {
-  zh: { title: '最近活动排序', description: '最近聊过的工作区和会话自动排到前面；超过 24 小时没有更新的工作区自动收起（每次打开页面每个工作区最多一次），并在行右侧显示距今未更新的时间标。' },
-  en: { title: 'Workspace recency order', description: 'Visually reorder workspace groups and their session rows by most recent activity, collapse workspaces idle for 24 hours, and label how long ago each was last active.' },
+  zh: { title: '最近活动排序', description: '待回复与运行中的会话钉在工作区顶部；跑完未看的会话矮化为小行；更早的休眠会话折叠成一行；工作区收起时未见的待回复/未读数量显示为标题徽章。超过 24 小时没有更新的工作区仍会自动收起（每次打开页面每个工作区最多一次），并在行右侧显示距今未更新的时间标。' },
+  en: { title: 'Workspace recency order', description: 'Sessions waiting on you and still-running sessions pin to the top of their workspace; finished-but-unread sessions shrink to micro rows; older dormant sessions fold into one summary row; attention hidden by a collapsed workspace shows as a header badge. Workspaces idle for 24 hours still auto-collapse (once per workspace per page load) and every row still carries its last-active age label.' },
 }
 
 // ---------------------------------------------------------------------------
@@ -218,6 +262,143 @@ const HOUR_MS = 60 * MINUTE_MS
 const DAY_MS = 24 * HOUR_MS
 const MONTH_MS = 30 * DAY_MS
 const YEAR_MS = 12 * MONTH_MS
+
+// ---------------------------------------------------------------------------
+// Liveness-layer constants (spec §1-§8). Same switch as the recency layer; all
+// of them are inert in degraded mode (no status source → nothing below runs).
+// ---------------------------------------------------------------------------
+
+/** Inside this window an idle session is still "recent" (full row). */
+const RECENT_MS = 2 * HOUR_MS
+
+/** Beyond this window an idle session is "dormant" (compacted, foldable). */
+const DORMANT_MS = 3 * HOUR_MS
+
+/** Dormant rows beyond this count per section fold into one summary row. */
+const FOLD_AFTER_DORMANT = 3
+
+/** An unread completion older than a week reads as stale (extra fade). */
+const STALE_UNREAD_MS = 7 * DAY_MS
+
+/** FLIP transition duration (ms) for rows that moved. */
+const FLIP_MS = 180
+
+/** Row rank of this feature's synthetic fold row (the overflow button is 999). */
+const FOLD_ROW_ORDER = '998'
+
+/** Marker values this feature injects into the tree. */
+const FOLD_VALUE = 'fold-row'
+const BADGE_VALUE = 'attention-badge'
+
+/** Tier precedence of the row ranking (lower rank = nearer the section top). */
+const TIER_RANK = { pending: 0, running: 1, unread: 2, recent: 3, dormant: 4 }
+
+/**
+ * Classify one session row into its liveness tier.
+ *
+ * Precedence (spec §1): archived → 'dormant' (the caller then excludes it from
+ * every attention/compact/fold treatment — archived rows keep today's
+ * treatment); a blocking pendingInteraction → 'pending'; a still-running
+ * session → 'running'; a completion the user has not seen → 'unread'; the
+ * current session (you are looking at it) → 'recent'; otherwise the time band:
+ * age < RECENT_MS → 'recent', age > DORMANT_MS → 'dormant', and the sticky
+ * band in between keeps `prevTier` (the last band result this client stored)
+ * so a clock tick cannot make a row flip between compact and full.
+ *
+ * Pure on purpose (test surface): `prevTier` is passed in, never read from a
+ * module global, so callers own the memory.
+ *
+ * @param {{now: number, updatedAt: number, status?: object, isCurrent?: boolean,
+ *   archived?: boolean, prevTier?: string}} input
+ * @returns {'pending'|'running'|'unread'|'recent'|'dormant'}
+ */
+export function classifyTier(input) {
+  const status = input.status
+  if (input.archived === true) return 'dormant'
+  if (status !== undefined && status !== null) {
+    if (status.pendingInteraction !== undefined && status.pendingInteraction !== null) return 'pending'
+    if (status.running === true) return 'running'
+    if (status.completionUnread === true) return 'unread'
+  }
+  if (input.isCurrent === true) return 'recent'
+  const age = input.now - input.updatedAt
+  if (age < RECENT_MS) return 'recent'
+  if (age > DORMANT_MS) return 'dormant'
+  return input.prevTier === 'dormant' ? 'dormant' : 'recent'
+}
+
+/** A count clamped to a non-negative integer (defensive locale-helper input). */
+function countOf(value) {
+  return typeof value === 'number' && Number.isFinite(value) && value > 0 ? Math.floor(value) : 0
+}
+
+/**
+ * The workspace header badge text for a set of hidden attention counts
+ * (spec §5): `2 待回复 · 1 未读` / `2 waiting · 1 unread`, zero parts omitted,
+ * and an empty string when there is no hidden attention at all (the caller
+ * then removes the badge).
+ * @param {string} locale - active locale id ('zh' prefix wins, else en).
+ * @param {{pending?: number, unread?: number}} counts
+ * @returns {string}
+ */
+export function attentionBadgeText(locale, counts) {
+  const pending = countOf(counts && counts.pending)
+  const unread = countOf(counts && counts.unread)
+  const zh = typeof locale === 'string' && locale.toLowerCase().startsWith('zh')
+  const parts = []
+  if (pending > 0) parts.push(zh ? `${pending} 待回复` : `${pending} waiting`)
+  if (unread > 0) parts.push(zh ? `${unread} 未读` : `${unread} unread`)
+  return parts.join(' · ')
+}
+
+/** The fold summary row's text (spec §4), host-shaped age via ageLabel. */
+function foldRowText(locale, hidden, ageMs) {
+  const zh = typeof locale === 'string' && locale.toLowerCase().startsWith('zh')
+  const age = ageLabel(locale, ageMs)
+  return zh ? `${hidden} 条更早会话 · 最近一次 ${age}` : `${hidden} earlier · last ${age}`
+}
+
+/**
+ * The sessions that carry hidden attention (spec §5/§6): a member of the
+ * workspace with a pending interaction or an unread completion. Reads the data
+ * layer only — the host does not render collapsed rows beyond its quota, so
+ * counting DOM rows would undercount exactly when the badge matters. Blank
+ * placeholders, subagent sessions and archived sessions are not attention
+ * (archived rows keep today's treatment).
+ */
+function attentionMembers(memberIds, data) {
+  const pending = []
+  const unread = []
+  if (data.statusMap === null) return { pending, unread }
+  for (const sessionId of memberIds) {
+    const session = data.byId[sessionId]
+    if (session === undefined || session.blank === true || session.origin === 'subagent') continue
+    if (data.archived.has(sessionId)) continue
+    const status = data.statusMap.get(sessionId)
+    if (status === undefined || status === null) continue
+    if (status.pendingInteraction !== undefined && status.pendingInteraction !== null) pending.push(sessionId)
+    else if (status.completionUnread === true) unread.push(sessionId)
+  }
+  return { pending, unread }
+}
+
+/**
+ * True while a workspace holds work that is happening right now (spec §6): a
+ * member that is running or waiting on the user. The group layer lifts such a
+ * workspace to "now" and the idle auto-collapse skips it — collapsing it would
+ * hide work in progress. Unread completions are deliberately NOT blocking:
+ * they wait for the user, so they must not pin a group forever.
+ */
+function hasBlockingAttention(memberIds, data) {
+  if (data.statusMap === null) return false
+  for (const sessionId of memberIds) {
+    const status = data.statusMap.get(sessionId)
+    if (status === undefined || status === null) continue
+    if (status.running === true
+      || (status.pendingInteraction !== undefined && status.pendingInteraction !== null)) return true
+  }
+  return false
+}
 
 /**
  * Host-shaped relative age ("多久没更新" label text).
@@ -642,6 +823,13 @@ function isSection(element) {
 function rowChildren(section) {
   const rows = []
   for (const child of section.children) {
+    // This feature's own injected children (the fold row) are never session
+    // rows: the pairing count gate and the row↔session alignment must stay
+    // untouched by anything this feature adds to the tree (the host renders
+    // no such child, so a marker is the only honest way to tell them apart).
+    if (child.dataset !== undefined && child.dataset !== null
+      && child.dataset.dshUxPlus !== undefined && child.dataset.dshUxPlus !== null
+      && child.dataset.dshUxPlus !== '') continue
     if (child.getAttribute('role') === 'group') continue
     if (child.tagName === 'BUTTON') continue
     if (isSection(child)) continue
@@ -672,6 +860,336 @@ function sectionCollapsed(section) {
   return button !== null && button.getAttribute('aria-expanded') === 'false'
 }
 
+// ---------------------------------------------------------------------------
+// Liveness layer (spec §1-§8). Everything here is inert without a status map:
+// callers guard on `data.statusMap !== null` (degraded mode == the feature as
+// it behaved before this layer existed).
+// ---------------------------------------------------------------------------
+
+/** Full-row density: every property the density layer owns is restored. */
+const FULL_DENSITY = { paddingBlock: null, fontSize: null, opacity: null }
+/** Unread completion: a micro row (still visible, still carrying its dot). */
+const MICRO_DENSITY = { paddingBlock: '1px', fontSize: '11px', opacity: '0.8' }
+/** Unread completion older than STALE_UNREAD_MS: faded further, never hidden. */
+const STALE_DENSITY = { paddingBlock: '1px', fontSize: '11px', opacity: '0.55' }
+/** Dormant (non-archived): compact, before folding ever hides it. */
+const COMPACT_DENSITY = { paddingBlock: '2px', fontSize: '11px', opacity: '0.65' }
+
+/** The inline properties the density layer owns (restored when not in use). */
+const DENSITY_PROPERTIES = ['paddingBlock', 'fontSize', 'opacity']
+
+/** The workspace header row's aria-expanded state (undefined while unreadable). */
+function sectionExpanded(section) {
+  const row = sectionHeaderRow(section, 0)
+  if (row === null || typeof row.getAttribute !== 'function') return undefined
+  const value = row.getAttribute('aria-expanded')
+  if (value === 'true') return true
+  if (value === 'false') return false
+  return undefined
+}
+
+/**
+ * The element a row's density is written on: the host's own `data-row-key`
+ * row when the flex item IS the row, else the first such row inside the flex
+ * item (the host wraps each row in one span), else the flex item itself. The
+ * guards exist because the test fixtures are plain objects without matches()
+ * or firstElementChild — a missing method must never cost a row its styling.
+ */
+function rowElementOf(entry) {
+  const element = entry.element
+  if (element === undefined || element === null) return element
+  if (typeof element.matches === 'function') {
+    try {
+      if (element.matches('[data-row-key^="session:"]')) return element
+    } catch { /* an exotic matches() is no reason to skip the row */ }
+  }
+  if (typeof element.querySelector === 'function') {
+    const inner = element.querySelector('[data-row-key^="session:"]')
+    if (inner !== null && inner !== undefined) return inner
+  }
+  return element.firstElementChild || element
+}
+
+/** This row's tier, with the sticky-band memory this client owns (spec §1). */
+function tierOf(session, data) {
+  if (data.statusMap === null) return 'recent'
+  const archived = data.archived.has(session.id)
+  const isCurrent = session.id === data.currentId
+  const tier = classifyTier({
+    now: data.now,
+    updatedAt: session.updatedAt,
+    status: data.statusMap.get(session.id),
+    isCurrent,
+    archived,
+    prevTier: data.tierMemory.get(session.id),
+  })
+  // Only the two idle bands are remembered (attention states must win again
+  // the moment they come back, and a fresh update must clear a stale dormant).
+  if (tier === 'recent' || tier === 'dormant') data.tierMemory.set(session.id, tier)
+  return tier
+}
+
+/** The density spec for one ranked row (spec §3). */
+function densitySpec(entry, data) {
+  // Leading rows (the current blank and the user's pins) keep the host's full
+  // row: re-styling a pin would fight an explicit user action.
+  if (entry.leading === true) return FULL_DENSITY
+  if (entry.tier === 'unread') {
+    return data.now - entry.session.updatedAt > STALE_UNREAD_MS ? STALE_DENSITY : MICRO_DENSITY
+  }
+  if (entry.tier === 'dormant' && !data.archived.has(entry.session.id)) return COMPACT_DENSITY
+  return FULL_DENSITY
+}
+
+/** Apply one density spec, restoring every property the spec does not use. */
+function applyDensity(styles, element, spec) {
+  if (element === undefined || element === null) return
+  for (const property of DENSITY_PROPERTIES) {
+    const value = spec[property]
+    if (value === undefined || value === null) styles.restore(element, property)
+    else styles.write(element, property, value)
+  }
+}
+
+/** This feature's injected fold row among a section's children, or null. */
+function findFoldRow(section) {
+  for (const child of section.children) {
+    if (child.dataset !== undefined && child.dataset !== null && child.dataset.dshUxPlus === FOLD_VALUE) return child
+  }
+  return null
+}
+
+/** Detach one element this feature injected, whichever DOM it lives in. */
+function detach(element, set) {
+  if (element === undefined || element === null) return
+  if (set !== undefined && set !== null) set.delete(element)
+  if (typeof element.remove === 'function') {
+    element.remove()
+    return
+  }
+  if (element.parentNode !== null && element.parentNode !== undefined) element.parentNode.removeChild(element)
+}
+
+/**
+ * Insert (or refresh) the section's synthetic fold row — the section's last
+ * flex item, ordered just before the overflow button's 999. The click reveals
+ * the hidden rows for the rest of the page load only (a page-load Set in
+ * client()): folding is a presentation decision, never persisted state.
+ */
+function ensureFoldRow(section, data, key, text) {
+  let row = findFoldRow(section)
+  if (row === null) {
+    row = document.createElement('div')
+    row.dataset.dshUxPlus = FOLD_VALUE
+    const button = document.createElement('button')
+    if (typeof button.setAttribute === 'function') button.setAttribute('type', 'button')
+    button.style.background = 'none'
+    button.style.border = 'none'
+    button.style.color = 'var(--dsw-alias-label-tertiary, #8a8f98)'
+    button.style.fontSize = '11px'
+    button.style.fontFamily = 'inherit'
+    button.style.cursor = 'pointer'
+    button.style.textAlign = 'start'
+    button.style.padding = '2px 8px'
+    button.style.width = '100%'
+    if (typeof button.addEventListener === 'function') {
+      button.addEventListener('click', (event) => {
+        if (event !== undefined && event !== null && typeof event.stopPropagation === 'function') event.stopPropagation()
+        data.onReveal(key)
+      })
+    }
+    row.appendChild(button)
+    data.foldRows.add(row)
+  }
+  row.dataset.dshUxPlusKey = key
+  if (row.parentNode !== section) section.appendChild(row)
+  data.styles.write(row, 'order', FOLD_ROW_ORDER)
+  const button = row.children[0]
+  if (button !== undefined && button !== null) button.textContent = text
+  return row
+}
+
+/** Take the fold row back out of the section (nothing left to fold). */
+function removeFoldRow(section, data) {
+  const row = findFoldRow(section)
+  if (row === null) return
+  data.styles.restore(row, 'order')
+  detach(row, data.foldRows)
+}
+
+/**
+ * Fold the section's surplus dormant rows (spec §4). Rows stay in the DOM —
+ * only `display` is written — so the replay count and the row↔session pairing
+ * keep matching. Archived rows keep today's treatment, the current session is
+ * never hidden, and a leading (pinned) row is never hidden either: the density
+ * layer keeps leading rows full, and hiding one of them would contradict it.
+ */
+function applyFold(section, account, ordered, data) {
+  const eligible = []
+  for (const entry of ordered) {
+    if (entry.tier !== 'dormant') continue
+    if (data.archived.has(entry.session.id)) continue
+    if (entry.session.id === data.currentId) continue
+    if (entry.leading === true) continue
+    eligible.push(entry)
+  }
+  const hidden = data.revealed.has(account.key) ? [] : eligible.slice(FOLD_AFTER_DORMANT)
+  const hiddenElements = new Set()
+  for (const entry of hidden) hiddenElements.add(entry.element)
+  for (const entry of ordered) {
+    if (hiddenElements.has(entry.element)) data.styles.write(entry.element, 'display', 'none')
+    else data.styles.restore(entry.element, 'display')
+  }
+  if (hidden.length === 0) {
+    removeFoldRow(section, data)
+    return
+  }
+  let newest = Number.NEGATIVE_INFINITY
+  for (const entry of hidden) {
+    if (entry.session.updatedAt > newest) newest = entry.session.updatedAt
+  }
+  ensureFoldRow(section, data, account.key, foldRowText(data.locale, hidden.length, data.now - newest))
+}
+
+/** This feature's attention badge among a row's children, or null. */
+function findBadge(row) {
+  for (const child of row.children) {
+    if (child.dataset !== undefined && child.dataset !== null && child.dataset.dshUxPlus === BADGE_VALUE) return child
+  }
+  return null
+}
+
+/**
+ * The attention that is NOT visible (spec §5), or null when no badge belongs
+ * on this section's header.
+ *
+ * Three cases, in the host's own terms: a collapsed workspace renders no rows
+ * at all (every non-blank, non-subagent, non-archived attention member is
+ * hidden); an expanded workspace whose host overflow button is present renders
+ * only its quota (the members outside the replayed slice are hidden); an
+ * expanded workspace with no overflow button shows everything, so attention
+ * needs no badge. Counts come from the data layer × the status map, never from
+ * counting DOM rows — the host does not render collapsed rows beyond its
+ * quota, so a DOM count would undercount exactly when the badge matters.
+ */
+function hiddenAttention(section, account, data, view) {
+  const attention = attentionMembers(account.memberIds, data)
+  if (attention.pending.length === 0 && attention.unread.length === 0) return null
+  if (sectionExpanded(section) === false) {
+    // A collapsed workspace renders no rows at all: every attention member
+    // is hidden, and the badge carries the counts the DOM cannot show.
+    return { pending: attention.pending.length, unread: attention.unread.length }
+  }
+  if (overflowButton(section) === null) return null
+  const rows = rowChildren(section)
+  const expected = renderedOrder(account.memberIds, account.key, data, view)
+  const shown = collapsedShown(expected, data, rows.length)
+  // An untrustworthy replay is no basis for a count: draw nothing.
+  if (shown === null || rows.length !== shown.length) return null
+  const visible = new Set(shown)
+  return {
+    pending: attention.pending.filter((id) => !visible.has(id)).length,
+    unread: attention.unread.filter((id) => !visible.has(id)).length,
+  }
+}
+
+/**
+ * Draw or clear the workspace header's attention badge (spec §5). It is
+ * inserted before the row's actions span, exactly like the age label, but it
+ * is NOT hidden on hover: this is attention, the one thing the row exists to
+ * carry. The element is reused across passes and removed when the count drops
+ * back to zero.
+ */
+function applyAttentionBadge(section, account, data, view) {
+  const header = sectionHeaderRow(section, 0)
+  if (header === null || typeof header.getAttribute !== 'function') return
+  const hidden = hiddenAttention(section, account, data, view)
+  if (hidden === null) {
+    const stale = findBadge(header)
+    if (stale !== null) detach(stale, data.badges)
+    return
+  }
+  let badge = findBadge(header)
+  if (badge === null) {
+    badge = document.createElement('span')
+    badge.dataset.dshUxPlus = BADGE_VALUE
+    badge.style.flex = 'none'
+    badge.style.fontSize = '10px'
+    badge.style.lineHeight = '16px'
+    badge.style.color = 'var(--dsw-alias-label-secondary, #b8bcc4)'
+    badge.style.whiteSpace = 'nowrap'
+    const actions = findRowActions(header)
+    if (actions !== null && typeof header.insertBefore === 'function') header.insertBefore(badge, actions)
+    else header.appendChild(badge)
+    data.badges.add(badge)
+  }
+  badge.textContent = attentionBadgeText(data.locale, hidden)
+}
+
+/**
+ * FLIP (spec §8): the "First" snapshot, taken before any order is written.
+ * Null when the environment cannot animate (no rAF / no layout API — the test
+ * fixtures), in which case the whole animation path is skipped.
+ */
+function snapshotTops(tree) {
+  if (typeof window === 'undefined' || window === null) return null
+  if (typeof window.requestAnimationFrame !== 'function') return null
+  if (typeof window.matchMedia === 'function') {
+    try {
+      if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) return null
+    } catch { /* an exotic matchMedia cannot stop the feature, only animate it */ }
+  }
+  if (tree === undefined || tree === null || typeof tree.querySelectorAll !== 'function') return null
+  let rows = null
+  try {
+    rows = tree.querySelectorAll('[data-row-key^="session:"]')
+  } catch {
+    return null
+  }
+  if (rows === null || rows === undefined) return null
+  const tops = new Map()
+  for (const row of rows) {
+    if (typeof row.getBoundingClientRect !== 'function') continue
+    try {
+      tops.set(row, row.getBoundingClientRect().top)
+    } catch { /* a detached or exotic row simply gets no animation */ }
+  }
+  return tops
+}
+
+/** One in-flight animation cleared back to its resting state. */
+function clearFlip(element) {
+  if (element === undefined || element === null) return
+  element.style.transform = ''
+  element.style.transition = ''
+}
+
+/**
+ * FLIP (spec §8): after the orders are written, every row that moved more than
+ * 4px is translated back to where it was, then released over FLIP_MS. Elements
+ * are handed to `flips` so the caller can clear a lingering transform on
+ * dispose (a disposed feature must not leave a translate behind).
+ */
+function animateFlip(tops, flips) {
+  for (const [element, top] of tops) {
+    if (typeof element.getBoundingClientRect !== 'function') continue
+    let moved = 0
+    try {
+      moved = top - element.getBoundingClientRect().top
+    } catch {
+      continue
+    }
+    if (Math.abs(moved) <= 4) continue
+    element.style.transition = 'none'
+    element.style.transform = `translateY(${moved}px)`
+    flips.add(element)
+    window.requestAnimationFrame(() => {
+      element.style.transition = `transform ${FLIP_MS}ms ease`
+      element.style.transform = ''
+    })
+  }
+}
+
 /**
  * Style writes with original caching (plan W-6): the first write of a
  * property caches the element's current value; clear() puts every cached
@@ -685,16 +1203,45 @@ function makeStyleCache() {
       cached = {}
       records.set(element, cached)
     }
-    if (cached[property] === undefined) cached[property] = element.style[property]
+    if (!Object.prototype.hasOwnProperty.call(cached, property)) cached[property] = element.style[property]
     element.style[property] = value
+  }
+  /**
+   * Put one cached property back and forget that record, so the next write
+   * caches the restored original again. The liveness layer flips the same
+   * element between full, compact and micro on every pass: a bare write of the
+   * full-size value would cache the compact one as "the original" and leak it
+   * past dispose. A property this feature never wrote is a no-op.
+   *
+   * A missing original (undefined) means the element carried no inline value
+   * at all before the write — true for any DOM that reports unset properties
+   * as absent rather than as '' (the plain-object test fixtures). Assigning
+   * `undefined` back would leave the value we wrote in place, so the property
+   * is removed instead: that is the only honest restore.
+   */
+  function restore(element, property) {
+    const cached = records.get(element)
+    if (cached === undefined) return
+    if (!Object.prototype.hasOwnProperty.call(cached, property)) return
+    const original = cached[property]
+    delete cached[property]
+    if (original === undefined) {
+      delete element.style[property]
+      return
+    }
+    element.style[property] = original
   }
   function clear() {
     for (const [element, cached] of records) {
-      for (const property of Object.keys(cached)) element.style[property] = cached[property]
+      for (const property of Object.keys(cached)) {
+        const original = cached[property]
+        if (original === undefined) delete element.style[property]
+        else element.style[property] = original
+      }
     }
     records.clear()
   }
-  return { write, clear }
+  return { write, restore, clear }
 }
 
 /**
@@ -753,6 +1300,19 @@ function childrenOf(workspace, data) {
  * what this feature promises, and it is why a sidebar left in 手动排序 no
  * longer freezes stale positions.
  */
+/**
+ * The recency tie-break every layer already used: freshest first, id ascending
+ * when two sessions share a timestamp (a total order, so the result does not
+ * depend on the engine's sort implementation).
+ */
+function compareRecency(a, b) {
+  if (a.session.updatedAt !== b.session.updatedAt) return b.session.updatedAt - a.session.updatedAt
+  const left = a.session.id
+  const right = b.session.id
+  if (left === right) return 0
+  return left < right ? -1 : 1
+}
+
 function orderRows(section, account, data, view) {
   const expected = renderedOrder(account.memberIds, account.key, data, view)
   const rows = rowChildren(section)
@@ -769,25 +1329,42 @@ function orderRows(section, account, data, view) {
     traceSkip(account.key, 'pairing', `row ${unpaired} of ${shown.length}`)
     return
   }
-  const entries = shown.map((id, index) => ({ session: data.byId[id], element: rows[index] }))
+  const entries = shown.map((id, index) => {
+    const session = data.byId[id]
+    return { session, element: rows[index], tier: tierOf(session, data) }
+  })
   const leading = []
   const ranked = []
   entries.forEach((entry, index) => {
     const blankFront = index === 0 && entry.session.blank === true
     const pinnedFront = !blankFront && !data.archived.has(entry.session.id)
       && data.pinned.has(entry.session.id)
-    if (blankFront || pinnedFront) leading.push(entry)
-    else ranked.push(entry)
+    if (blankFront || pinnedFront) {
+      entry.leading = true
+      leading.push(entry)
+    } else {
+      ranked.push(entry)
+    }
   })
-  ranked.sort((a, b) => b.session.updatedAt - a.session.updatedAt
-    || (a.session.id < b.session.id ? -1 : a.session.id > b.session.id ? 1 : 0))
-  leading.concat(ranked).forEach((entry, rank) => {
+  // Without a status map there is no liveness layer at all: the ranking stays
+  // exactly the recency ranking this feature always applied. With one, the
+  // tiers lead (pending > running > unread > recent > dormant) and recency
+  // breaks the ties inside a tier.
+  ranked.sort(data.statusMap === null
+    ? compareRecency
+    : (a, b) => TIER_RANK[a.tier] - TIER_RANK[b.tier] || compareRecency(a, b))
+  const ordered = leading.concat(ranked)
+  ordered.forEach((entry, rank) => {
     data.styles.write(entry.element, 'order', String(10 + rank))
     data.styles.write(entry.element, 'flexShrink', '0')
+    // Row density (spec §3): the compacting/micro properties live on the row
+    // element; the flex item above it keeps the host's own box.
+    if (data.statusMap !== null) applyDensity(data.styles, rowElementOf(entry), densitySpec(entry, data))
   })
   // The overflow button stays last no matter what.
   const button = overflowButton(section)
   if (button !== null) data.styles.write(button, 'order', '999')
+  if (data.statusMap !== null) applyFold(section, account, ordered, data)
 }
 
 /** Collapse whitespace runs and trim (header-text comparison). */
@@ -872,14 +1449,23 @@ function orderLevel(container, workspaces, topLevel, data, view) {
   }
   // W-1 group layer: freshest activity first, no-activity last, ties keep
   // the host's existing order (stable sort on the original index).
-  const ranked = pairs.map((pair, index) => ({
-    section: pair.section,
-    workspace: pair.workspace,
-    index,
-    activity: pair.workspace === null
+  const ranked = pairs.map((pair, index) => {
+    const base = pair.workspace === null
       ? bucketActivity(data)
-      : latestSessionUpdate(pair.workspace, data.byId),
-  }))
+      : latestSessionUpdate(pair.workspace, data.byId)
+    // Liveness boost (spec §6): a group holding a session that needs the user
+    // right now (running, or blocked on a reply) is "active now" no matter
+    // when it last changed. Only with a status map — and unread completions do
+    // NOT lift a group: those are attention, not activity, and the fold above
+    // tells them apart. The boost is a floor of `now`, never a new maximum, so
+    // a group cannot claim to be fresher than a session updated in the future.
+    let activity = base
+    if (data.statusMap !== null) {
+      const members = pair.workspace === null ? ungroupedMembers(data) : pair.workspace.sessionIds
+      if (hasBlockingAttention(members, data) && data.now > base) activity = data.now
+    }
+    return { section: pair.section, workspace: pair.workspace, index, activity }
+  })
   ranked.sort((a, b) => {
     if (a.activity === b.activity) return a.index - b.index
     if (a.activity === Number.NEGATIVE_INFINITY) return 1
@@ -899,6 +1485,10 @@ function orderLevel(container, workspaces, topLevel, data, view) {
       ? { memberIds: ungroupedMembers(data), key: UNGROUPED_KEY }
       : { memberIds: workspace.sessionIds, key: workspace.workspaceId }
     orderRows(section, account, data, view)
+    // Attention badge (spec §5): always run it, so a badge whose attention was
+    // consumed (replied, read, opened) is removed on the very next pass. In
+    // degraded mode attentionMembers() is empty and this only clears.
+    applyAttentionBadge(section, account, data, view)
     // Nested level: the group container's sections, same rules, no bucket.
     const containerDiv = groupContainer(section)
     if (containerDiv !== null) {
@@ -935,6 +1525,20 @@ export function client(ctx, deps) {
   let disposed = false
   /** Workspace ids already auto-collapsed during this page load. */
   const collapsedOnce = new Set()
+  // ---- liveness layer state (all of it inert without a status map) --------
+  /** Per-session band memory for the sticky recent/dormant boundary (spec §1). */
+  const tierMemory = new Map()
+  /** Account keys whose folded tail the user revealed (page load only, §4). */
+  const revealed = new Set()
+  /** Our injected fold rows / attention badges, for an exact dispose. */
+  const foldRows = new Set()
+  const badges = new Set()
+  /** Rows with an in-flight FLIP transform (cleared on dispose, §8). */
+  const flips = new Set()
+  /** True while the pointer is inside the grouped tree (spec §7). */
+  let pointerInTree = false
+  /** A pass was requested while frozen; it runs the moment the freeze lifts. */
+  let dirty = false
 
   // Hover/menu dismissal mirroring the host's `.sessionRow:hover .time`
   // rule (Rows.module.css:279-282): the action buttons take the space.
@@ -955,6 +1559,32 @@ export function client(ctx, deps) {
       } catch { /* fall through to the default */ }
     }
     return 'zh'
+  }
+
+  /**
+   * The host's liveness map (the `uiSession` service), or null. Null IS the
+   * degraded mode: every liveness behavior below is skipped and the feature
+   * behaves exactly as it did before this layer existed. A missing service, a
+   * snapshot that is not a Map-like, and a throwing getSnapshot() all degrade
+   * the same way — never a broken pass.
+   */
+  function readStatusMap() {
+    const observable = deps && deps.uiSession && deps.uiSession.sessionStatus
+    if (observable === undefined || observable === null) return null
+    if (typeof observable.getSnapshot !== 'function') return null
+    try {
+      const snapshot = observable.getSnapshot()
+      if (snapshot === undefined || snapshot === null || typeof snapshot.get !== 'function') return null
+      return snapshot
+    } catch {
+      return null
+    }
+  }
+
+  /** Reveal a section's folded tail for the rest of this page load (spec §4). */
+  function onReveal(accountKey) {
+    revealed.add(accountKey)
+    schedule()
   }
 
   /** Snapshot the live lists; null while either list is not ready. */
@@ -990,6 +1620,16 @@ export function client(ctx, deps) {
       // through the same list snapshot (tree.ts:390-395), so the row replay
       // can mirror it without a statuses service.
       projectionsBySession: sessionSnapshot.projectionsBySession,
+      // Liveness layer (spec §1-§8). `statusMap === null` turns the whole layer
+      // off, which is how the pre-liveness behavior stays testable.
+      statusMap: readStatusMap(),
+      now: Date.now(),
+      locale: activeLocale(),
+      tierMemory,
+      revealed,
+      foldRows,
+      badges,
+      onReveal,
       styles,
     }
   }
@@ -1012,8 +1652,102 @@ export function client(ctx, deps) {
     return null
   }
 
+  /**
+   * Is a menu open inside the tree? The host marks its open row `.menuOpen`
+   * (the literal class name is not hashed — this module's own CSS rule already
+   * relies on it), and a pass that moved rows out from under an open popup
+   * would leave the popup anchored to a row that is no longer there.
+   *
+   * Checked by selector first (the host's tree is a real element: one cheap
+   * query), then by a structurally WALKED search, because a test fixture's
+   * selector engine is a stub. The walk is bounded in both depth and visited
+   * nodes — a huge tree must never turn the freeze check into a stall.
+   */
+  function menuOpenWithin(node, depth, budget) {
+    if (depth <= 0 || node === undefined || node === null) return false
+    if (budget.spent >= 600) return false
+    budget.spent += 1
+    const className = typeof node.className === 'string' ? node.className : ''
+    // A cheap substring test first: split() for every visited node would
+    // allocate on each pass just to prove nothing matched.
+    if (className.indexOf('menuOpen') !== -1 && className.split(/\s+/).indexOf('menuOpen') !== -1) {
+      return true
+    }
+    for (const child of node.children || []) {
+      if (menuOpenWithin(child, depth - 1, budget)) return true
+    }
+    return false
+  }
+
+  /**
+   * Churn freeze (spec §7): while the pointer is inside the tree, or a menu is
+   * open inside it, a pass would move rows under the user's cursor or detach an
+   * open popup's anchor. Passes are DEFERRED, never dropped — the flag makes
+   * the running pass a no-op and the next event (pointerout, a store
+   * notification, a mutation) re-runs it once the freeze has lifted.
+   */
+  function frozen() {
+    if (pointerInTree) return true
+    const found = findTree()
+    if (found === null) return false
+    // A native class lookup is authoritative and cheap; when it answers, the
+    // 600-node walk below would only repeat its verdict at a fraction of the
+    // speed — and this runs on every coalesced pass, including every mutation
+    // batch of a streaming conversation. The walk is the fixture fallback:
+    // stub selector engines answer null even with a menu open.
+    if (typeof found.tree.getElementsByClassName === 'function') {
+      try {
+        const open = found.tree.getElementsByClassName('menuOpen')
+        if (open !== null && open !== undefined) return open.length > 0
+      } catch { /* odd node: the next engine, then the walk, still answer */ }
+    }
+    if (typeof found.tree.querySelector === 'function') {
+      try {
+        if (found.tree.querySelector('.menuOpen') !== null) return true
+      } catch { /* no selector engine on this node: the walk below still answers */ }
+    }
+    return menuOpenWithin(found.tree, 6, { spent: 0 })
+  }
+
+  /**
+   * Pointer-in-tree tracking (spec §7): one document-level listener pair,
+   * installed only when the document supports it and removed on dispose.
+   * `closest` may be missing (synthetic events, odd targets) — an unreadable
+   * target is simply not in the tree, which fails open and never freezes the
+   * sidebar for good.
+   */
+  function inTree(node) {
+    return typeof node === 'object' && node !== null
+      && typeof node.closest === 'function' && node.closest('[role="tree"]') !== null
+  }
+
+  function onPointerOver(event) {
+    if (inTree(event && event.target)) pointerInTree = true
+  }
+
+  function onPointerOut(event) {
+    // Moving from a child to its parent fires pointerout on the child first:
+    // the relatedTarget (where the pointer went) is the honest answer. A
+    // missing relatedTarget means the pointer left the window (or an odd
+    // synthetic event) — that is NOT "still inside": falling back to the
+    // event target here would freeze the sidebar for good the moment the
+    // mouse exits the window from a row. Fail open; the paired pointerover
+    // re-arms the freeze when the pointer actually comes back.
+    if (event !== null && event !== undefined
+      && event.relatedTarget !== undefined && event.relatedTarget !== null
+      && inTree(event.relatedTarget)) return
+    if (!pointerInTree) return
+    pointerInTree = false
+    schedule()
+  }
+
   /** One full pass: structural find, then the two-layer reorder. */
   function reorder() {
+    if (frozen()) {
+      dirty = true
+      return
+    }
+    dirty = false
     const data = readData()
     if (data === null) {
       styles.clear()
@@ -1031,9 +1765,20 @@ export function client(ctx, deps) {
       return
     }
     const view = viewOrdering()
+    // A FLIP still in flight would poison the "First" measurement below (its
+    // residual translate is part of the rect), so in-flight animations are
+    // released before the snapshot — the rows snap to their resting place, and
+    // the pass that follows animates from the honest one.
+    for (const element of flips) clearFlip(element)
+    flips.clear()
+    // FLIP "First" (spec §8): the rows' tops before any order is written. Null
+    // when the environment cannot animate (no rAF / no layout API / reduced
+    // motion), in which case the pass is exactly what it always was.
+    const tops = snapshotTops(found.tree)
     styles.write(found.tree, 'display', 'flex')
     styles.write(found.tree, 'flexDirection', 'column')
     orderLevel(found.tree, roots, true, data, view)
+    if (tops !== null) animateFlip(tops, flips)
   }
 
   /**
@@ -1042,11 +1787,15 @@ export function client(ctx, deps) {
    * never suppresses labels here); shares the same debounced schedule.
    */
   function idlePass() {
+    if (frozen()) {
+      dirty = true
+      return
+    }
     const data = readData()
     if (data === null) return
     const rows = document.querySelectorAll(`[data-row-key^="${ROW_PREFIX}"]`)
-    const now = Date.now()
-    const locale = activeLocale()
+    const now = data.now
+    const locale = data.locale
     for (const row of rows) {
       const rowKey = row.getAttribute('data-row-key')
       const workspaceId = typeof rowKey === 'string' ? rowKey.slice(ROW_PREFIX.length) : ''
@@ -1072,6 +1821,11 @@ export function client(ctx, deps) {
         else row.appendChild(label)
       }
       label.textContent = ageLabel(locale, now - latest)
+      // Liveness layer (spec §6): a workspace that still holds a running or
+      // blocked session is not idle, however long ago it last changed — it must
+      // not be auto-collapsed out from under the user. An unread completion
+      // does not hold the section open: its badge keeps it visible either way.
+      if (idle && hasBlockingAttention(workspace.sessionIds, data)) continue
       if (idle && !collapsedOnce.has(workspaceId)) {
         collapsedOnce.add(workspaceId)
         if (row.getAttribute('aria-expanded') === 'true' && typeof row.click === 'function') row.click()
@@ -1084,6 +1838,13 @@ export function client(ctx, deps) {
     timer = window.setTimeout(function () {
       timer = null
       if (disposed) return
+      if (frozen()) {
+        // Deferred, not dropped: pointerout / a store notification / a mutation
+        // re-schedules once the freeze has lifted.
+        dirty = true
+        return
+      }
+      dirty = false
       reorder()
       idlePass()
     }, 0)
@@ -1095,6 +1856,19 @@ export function client(ctx, deps) {
   const disposeWorkspaces = workspaces.subscribe(schedule)
   const locale = ctx && ctx.locale
   const disposeLocale = locale && typeof locale.subscribe === 'function' ? locale.subscribe(schedule) : null
+  // Liveness is the one signal the list snapshots cannot carry (running /
+  // pending / unread live in the uiSession service), so a status change
+  // schedules a pass exactly like a store change does. Absent service ⇒ no
+  // subscription and no liveness layer.
+  const statusObservable = deps && deps.uiSession && deps.uiSession.sessionStatus
+  const disposeStatus = statusObservable !== undefined && statusObservable !== null
+    && typeof statusObservable.subscribe === 'function'
+    ? statusObservable.subscribe(schedule)
+    : null
+  if (typeof document.addEventListener === 'function' && typeof document.removeEventListener === 'function') {
+    document.addEventListener('pointerover', onPointerOver)
+    document.addEventListener('pointerout', onPointerOut)
+  }
   // Age labels must age on an otherwise idle page (no store traffic).
   if (typeof window.setInterval === 'function') ageTimer = window.setInterval(schedule, AGE_TICK_MS)
   schedule()
@@ -1111,7 +1885,23 @@ export function client(ctx, deps) {
     disposeSessions()
     disposeWorkspaces()
     if (typeof disposeLocale === 'function') disposeLocale()
+    if (typeof disposeStatus === 'function') disposeStatus()
+    if (typeof document.removeEventListener === 'function') {
+      document.removeEventListener('pointerover', onPointerOver)
+      document.removeEventListener('pointerout', onPointerOut)
+    }
+    pointerInTree = false
     for (const row of document.querySelectorAll(`[data-row-key^="${ROW_PREFIX}"]`)) removeAgeLabel(row)
+    // Liveness artifacts, in the reverse order they were created: any in-flight
+    // FLIP transform first (a disposed feature leaves no translate behind),
+    // then every row it hid, then the fold rows and badges themselves.
+    for (const element of flips) clearFlip(element)
+    flips.clear()
+    for (const section of document.querySelectorAll(`[data-row-key^="${ROW_PREFIX}"]`)) removeFoldRow(section, { styles, foldRows })
+    for (const row of foldRows) detach(row)
+    foldRows.clear()
+    for (const badge of badges) detach(badge)
+    badges.clear()
     styleTag.remove()
     styles.clear()
   }

@@ -15,7 +15,7 @@ UX enhancements and quality-of-life plugins that make DeepSeek Harness easier to
 | --- | --- | --- |
 | Conversation typography | **[One-click comfort]** Pick a comfortable font size and reading width for the chat area. Long answers read easier, wide screens get used properly — without zooming the whole interface. | <img src="docs/images/typography.png" width="300" alt="Chat area rendering"> |
 | Session ID menu | **[Grab it in one click]** Copy a session's ID straight from its row menu — for `--session` resumes, locating records, or debugging, with no manual text selection. | <img src="docs/images/session-menu.png" width="200" alt="Session row menu"> |
-| Workspace recency order | **[Jump back + auto-tidy]** Freshest workspaces and sessions float to the top; workspaces idle for over a day collapse on their own and show how long ago they were last updated. | <img src="docs/images/idle-collapse.png" width="200" alt="Workspace age labels"> |
+| Workspace recency order | **[Jump back + auto-tidy]** Sessions that need you — awaiting reply, running, unread — pin to the top and bubble up as workspace badges when hidden; dormant ones shrink and fold away; workspaces idle for over a day collapse on their own and show their age. | <img src="docs/images/idle-collapse.png" width="200" alt="Workspace age labels"> |
 | Ask question expanded | **[Fewer clicks on review]** When a question finishes, the question and its answer stay expanded — checking a decision costs one less click. | — |
 | Inherit conversation | **[Switch models, keep going]** Pick a model in the session menu: a brand-new session in the current workspace reads the old conversation's progress and carries on. | <img src="docs/images/inherit-picker.png" width="200" alt="Model picker popover"> |
 
@@ -45,9 +45,15 @@ After you pick a model, the plugin:
 
 Great for: a session that ran too long and deserves a pricier model to finish; a rate-limited provider where you want to continue elsewhere; or simply transplanting progress into another model's context. The original session is untouched, and the Session ID copy stays as-is.
 
-### Workspace recency order (incl. idle collapse)
+### Workspace recency order (liveness, idle collapse, folding)
 
 Workspace groups and their session rows sort by most recent activity, so multiple parallel projects never bury the one you were just in; only the visual order changes — the host's sort settings and data stay intact.
+
+On top of recency, rows are ranked by **liveness** — the same signals the host's row dots show: sessions awaiting your reply and running sessions pin to the top of their workspace, unread finished sessions come next, and the session you are in stays at the top of the "recent" band. A workspace holding a running or blocked session also floats up in the group list. An unread session older than 7 days dims (color only, never moves): the dot is a fact, not a to-do, and never auto-clears.
+
+**Dormant sessions shrink**: rows untouched for over 7 days render compact, and from the fourth on they fold into a single "fold earlier · N · latest time" row — one click reveals them all for the rest of the page load. When attention rows are hidden by collapse, the 5-row cap or folding, the workspace row shows a count badge (e.g. "2 awaiting · 1 unread") until they are visible again; workspaces with running or awaiting sessions are never auto-collapsed.
+
+Reordering never fights you: it pauses while the pointer is inside the tree or a menu is open (deferred, never dropped), glides rows with a short FLIP transition (off under `prefers-reduced-motion`), and uses a 5-minute hysteresis at the group level so dormant workspaces don't bounce back just because you read one of their rows.
 
 The same feature also handles **idle tidying**: a workspace with no real activity for over **24 hours** (blank and subagent sessions don't count — same signal as the ordering) collapses automatically once when the page opens, and every workspace row shows its age on the right — now / Nm / Nh / Nd / Nmo / Ny — styled exactly like the host's session-row timestamps and hidden on hover.
 
@@ -93,9 +99,9 @@ npm run build   # tsdown emits lib/client.js (classic script, committed to the r
 
 The three most recent entries; full history in [CHANGELOG.md](CHANGELOG.md).
 
+- **v0.2.0 · 2026-10-15** — Recency order becomes liveness order: awaiting-reply / running / unread sessions pin to the top and bubble up as workspace count badges when hidden; dormant sessions render compact and fold behind a "fold earlier" row; reordering freezes under the pointer or an open menu; unread dots never auto-clear.
 - **v0.1.7 · 2026-10-14** — README restructured: English-first with a [Chinese counterpart](./README.zh-CN.md), screenshots moved into the feature table, update log trimmed to the three latest entries.
 - **v0.1.6 · 2026-10-14** — Idle workspace collapse and age labels are no longer a standalone feature: folded into Workspace recency order (same switch, same activity signal); settings back to five rows.
-- **v0.1.5 · 2026-10-14** — Workspaces idle for 24 hours auto-collapse (at most once per page load); workspace rows show a host-styled "last updated" age label that follows the DSH language and theme.
 
 ## License
 
