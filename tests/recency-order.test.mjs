@@ -719,6 +719,24 @@ function hostDomRow(id, title, time, status) {
   }
 }
 
+/**
+ * Append one more host row the way the host re-renders when its quota rises
+ * (same wrapper/row shape buildTree uses). Fixture helper.
+ * @returns {object} the wrapper element
+ */
+function appendHostRow(section, id, text) {
+  const wrap = makeElement('span')
+  const row = makeElement('div')
+  row.setAttribute('role', 'treeitem')
+  row.setAttribute('data-row-key', `session:${id}`)
+  row.textContent = text
+  wrap.textContent = text
+  wrap.appendChild(row)
+  wrap.querySelector = (sel) => (sel === '[data-row-key^="session:"]' ? row : null)
+  section.appendChild(wrap)
+  return wrap
+}
+
 test('host-shaped rows with a status badge before the title still rank by recency', async () => {
   // Core regression: the host renders the status badge (visually-hidden
   // labels that still land in textContent) BEFORE the title span, so the
@@ -2529,6 +2547,11 @@ test('an all-dormant section with host truncation folds everything behind one ba
     assert.equal(button.style.display, 'none', 'the host button steps aside')
     assert.equal(rows.s00.style.display, 'none', 'a dormant rendered row is folded too')
     button.setAttribute('aria-expanded', 'true')
+    // Host realism: raising the quota RENDERS the rows it was hiding — the
+    // section is self-consistent only once the DOM holds all 19 — and the host
+    // keeps the same control, now reading 收起.
+    for (const s of sessions.slice(5)) appendHostRow(section, s.id, `${s.displayTitle}6分钟`)
+    button.textContent = '收起'
     status.setStatuses({})
     env.flushTimers()
     assert.equal(markerChild(section, 'fold-bar'), null, 'the host expansion reveals everything')
@@ -2639,6 +2662,143 @@ test('an archived row keeps the host metrics: no compact box, no compact title',
     assert.equal(cellsOf(rowEl(rows.r1)).title.style.fontSize, undefined)
     assert.equal(cellsOf(rowEl(rows.r1)).title.style.marginLeft, undefined)
     assert.equal(rowEl(rows.r1).getAttribute('data-dsh-ux-zone'), null)
+  } finally {
+    tearDown()
+  }
+})
+
+// ---------------------------------------------------------------------------
+// Drift grace + the freeze's lifetime (user report m01265/m01302): the green
+// band vanished while every row kept its compact box, and it stayed away until
+// the pointer left the sidebar. Two defects met: any unexplained count tore the
+// section down (band included), and the churn freeze then deferred the pass that
+// would have rebuilt it.
+// ---------------------------------------------------------------------------
+
+/**
+ * Unexplained passes a section survives before it steps aside: the feature's
+ * DRIFT_GRACE_PASSES kept ones, plus the pass that decides.
+ */
+const DRIFT_PASSES = 4
+
+/** One section whose DOM is the host's own collapsed slice (quota + 1 running). */
+async function mountTruncated() {
+  const now = Date.now()
+  const sessions = [runningSession('run', 'Run one', now)]
+  const memberIds = ['run']
+  for (let i = 1; i <= 8; i += 1) {
+    sessions.push(session(`a${i}`, `A ${i}`, now - (9 - i) * 3 * HOUR_MS))
+    memberIds.push(`a${i}`)
+  }
+  const slice = ['run', 'a8', 'a7', 'a6', 'a5', 'a4']
+  const status = makeUiSession({ run: RUNNING_STATUS })
+  const mounted = await mount({
+    sections: [{
+      title: 'w1',
+      rows: slice.map((id) => rowSpec(id, id === 'run' ? 'Run one' : `A ${id.slice(1)}`)),
+      button: 'collapsed',
+    }],
+    sessions,
+    workspaces: [{ workspaceId: 'w1', path: '/w1', title: 'w1', sessionIds: memberIds }],
+    uiSession: status,
+  })
+  mounted.status = status
+  mounted.memberIds = memberIds
+  return mounted
+}
+
+test('a transient count drift keeps the green band: the section holds its last consistent presentation', async () => {
+  const { rows, section, env, status, tearDown } = await mountTruncated()
+  try {
+    env.flushTimers()
+    assert.ok(markerChild(section, 'zone-band') !== null, 'the consistent slice wears the band')
+    assert.equal(rowEl(rows.a8).style.height, '26px')
+    const rank = rows.a8.style.order
+    assert.ok(rank !== undefined)
+
+    // The host committed a row our replay does not explain yet (its own
+    // mutation is what scheduled this pass). That is 'unknown', not 'wrong'.
+    const drifted = appendHostRow(section, 'a3', 'A 36分钟')
+    status.setStatuses({ run: RUNNING_STATUS })
+    env.flushTimers()
+    assert.ok(markerChild(section, 'zone-band') !== null, 'the band rides out the drift')
+    assert.equal(section.style.isolation, 'isolate', 'and keeps its stacking context')
+    assert.equal(rows.a8.style.order, rank, 'with the ranks it last verified')
+    assert.equal(rowEl(rows.a8).style.height, '26px', 'and the compact rows untouched')
+
+    // The DOM catches up: the next pass is healthy again and re-ranks.
+    drifted.remove()
+    status.setStatuses({ run: RUNNING_STATUS })
+    env.flushTimers()
+    assert.ok(markerChild(section, 'zone-band') !== null, 'a healthy pass re-ensures the band')
+    assert.equal(rows.a8.style.order, rank)
+  } finally {
+    tearDown()
+  }
+})
+
+test('an unexplained count that persists hands the section back: band out, host order restored', async () => {
+  const { rows, section, button, env, status, tearDown } = await mountTruncated()
+  try {
+    env.flushTimers()
+    assert.ok(markerChild(section, 'zone-band') !== null)
+    button.textContent = '展开其余 3 个会话'
+    appendHostRow(section, 'a3', 'A 36分钟')
+    // The divergence never heals: after the grace the layer steps aside for good
+    // (presentation never guesses), which is the behavior the grace replaces for
+    // one beat.
+    for (let i = 0; i < DRIFT_PASSES; i += 1) {
+      status.setStatuses({ run: RUNNING_STATUS })
+      env.flushTimers()
+    }
+    assert.equal(markerChild(section, 'zone-band'), null, 'the band is released')
+    assert.equal(section.style.isolation, undefined, 'and the stacking context with it')
+    assert.equal(rows.a8.style.display, undefined, 'the folded rows are handed back')
+    // The step-aside gives up the band and the fold (which would strand at stale
+    // geometry); the ranks a consistent pass verified are left on the rows.
+    assert.equal(rows.a8.style.order, '11')
+    assert.equal(button.style.display, 'none', 'the host button steps aside')
+    const bar = markerChild(section, 'fold-bar')
+    assert.ok(bar !== null, 'the bar still speaks for the count we cannot explain')
+    assert.equal(bar.children[0].children[1].textContent, '3 条历史会话')
+  } finally {
+    tearDown()
+  }
+})
+
+test('the freeze has a lifetime: a deferred pass runs once both retries are spent', async () => {
+  const now = Date.now()
+  const sessions = [
+    session('a1', 'Active one', now - 30 * 60 * 1000),
+    session('d1', 'Dormant one', now - 25 * HOUR_MS),
+    session('d2', 'Dormant two', now - 30 * HOUR_MS),
+  ]
+  const status = makeUiSession({})
+  const { rows, section, env, tearDown } = await mount({
+    sections: [{ title: 'w1', rows: sessions.map((s) => rowSpec(s.id, s.displayTitle)) }],
+    sessions,
+    workspaces: [{ workspaceId: 'w1', path: '/w1', title: 'w1', sessionIds: ['a1', 'd1', 'd2'] }],
+    uiSession: status,
+  })
+  try {
+    env.flushTimers()
+    assert.equal(rows.d2.style.order, '13', 'd2 is the last dormant row')
+    env.listeners.pointerover[0]({
+      target: { closest: (sel) => (sel === '[role="tree"]' ? 'tree' : null) },
+    })
+    // d2 starts running: a restyle is now owed, but the pointer is inside.
+    status.setStatuses({ d2: RUNNING_STATUS })
+    env.flushTimers()
+    assert.equal(rows.d2.style.order, '13', 'the freeze still protects the resting cursor')
+    assert.equal(rows.d2.style.display, 'none', 'and nothing moved')
+    // Two retries, then the pass runs on its own instead of waiting forever for
+    // a pointerout that a user working in the sidebar never sends.
+    for (let i = 0; i < 8; i += 1) env.flushTimers()
+    assert.equal(rows.d2.style.order, '11', 'd2 leads the dormant block now')
+    assert.equal(rows.d2.style.display, undefined, 'a running row is never folded away')
+    // The lifetime is spent, not renewed: a pass that pierced the freeze must not
+    // re-arm the two retries, or a resting pointer would be repainted forever.
+    assert.equal(env.timers.filter(Boolean).length, 0, 'the spent budget stays spent')
   } finally {
     tearDown()
   }

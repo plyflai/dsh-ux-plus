@@ -321,6 +321,17 @@ const DEFER_RETRY_MS = [300, 1200]
  */
 const USER_ACTION_MS = 1000
 
+/**
+ * How many consecutive unexplained-count passes a section keeps its last
+ * consistent presentation (spec §1: a bail is 'unknown', not 'wrong'). Our
+ * passes ride the host's own mutations, so the first bail after a host commit is
+ * usually the store lagging by a beat and the very next pass agrees again;
+ * tearing the section down for that beat is what made the green band vanish.
+ * Three passes is long enough to ride out a commit and short enough that a
+ * shape this feature truly cannot model hands the section back quickly.
+ */
+const DRIFT_GRACE_PASSES = 3
+
 /** FLIP transition duration (ms) for rows that moved. */
 const FLIP_MS = 180
 
@@ -1585,14 +1596,44 @@ function applyFold(section, account, ordered, data) {
 }
 
 /**
+ * Did a consistent pass leave this section a presentation worth keeping?
+ * Either the zone band or a written rank is enough: a section the layer never
+ * reached has nothing to preserve, and must go straight to the step-aside path.
+ * @returns {boolean}
+ */
+function hasPresentation(section) {
+  if (findZoneBand(section) !== null) return true
+  for (const row of rowChildren(section)) {
+    const order = row.style === undefined ? undefined : row.style.order
+    if (order !== undefined && order !== '') return true
+  }
+  return false
+}
+
+/**
  * Fallback absorption (issue 3): when the row layer bails on count or pairing
  * drift, the section must STILL carry exactly one truncation row. The host
  * button's own label is host truth and needs no row pairing, so the bar still
  * absorbs it; anything this feature hid on an earlier successful pass is put
  * back, and the band (which would strand at stale geometry) is taken out.
+ *
+ * A bail is 'unknown', not 'wrong' (the reported '怎么突然不生效了 / 绿色的效果
+ * 没了'): these passes are scheduled by the HOST's own mutations, so one can
+ * legitimately run in the instant between the host committing new rows and the
+ * store publishing them — our exempt model and its slice then disagree by a row
+ * or two. Stepping aside at that instant is what the user reads as the green
+ * disappearing, so the section keeps its last consistent presentation (band,
+ * fold and ranks together, so nothing lies) for a few passes; only a divergence
+ * that persists — a shape this feature genuinely cannot model — falls through to
+ * the step-aside below.
  */
 function absorbHostTruncation(section, account, data) {
   if (data.statusMap === null) return
+  const drift = data.driftPasses.get(account.key) || 0
+  if (drift < DRIFT_GRACE_PASSES && hasPresentation(section)) {
+    data.driftPasses.set(account.key, drift + 1)
+    return
+  }
   for (const row of rowChildren(section)) data.styles.restore(row, 'display')
   const band = findZoneBand(section)
   if (band !== null) {
@@ -1996,6 +2037,9 @@ function orderRows(section, account, data, view) {
   if (data.statusMap !== null) {
     applyFold(section, account, ordered, data)
     ensureZoneBand(section, ordered, data)
+    // This pass explained the section, so any drift grace it was spending is
+    // over: the next unexplained pass starts the count from scratch.
+    data.driftPasses.delete(account.key)
   }
 }
 
@@ -2169,6 +2213,11 @@ export function client(ctx, deps) {
   const bands = new Set()
   /** Host rows carrying a zone attribute (removed again on dispose, §2). */
   const zoneMarked = new Set()
+  /**
+   * Consecutive unexplained-count passes per section key: the grace counter for
+   * a section that is keeping its last consistent presentation (spec §1).
+   */
+  const driftPasses = new Map()
   /** Rows with an in-flight FLIP transform (cleared on dispose, §8). */
   const flips = new Set()
   /** True while the pointer is inside the grouped tree (spec §7). */
@@ -2329,6 +2378,7 @@ export function client(ctx, deps) {
       dots,
       bands,
       zoneMarked,
+      driftPasses,
       onToggleReveal,
       onUserAction,
       styles,
@@ -2458,7 +2508,6 @@ export function client(ctx, deps) {
       return
     }
     dirty = false
-    retrySteps = 0
     const data = readData()
     if (data === null) {
       styles.clear()
@@ -2567,7 +2616,14 @@ export function client(ctx, deps) {
       // one is the pass that answers the click.
       const acting = Date.now() < userActedUntil
       const answering = acting && !userActedHandled
-      if (frozen() && !switched && !acting) {
+      // The freeze is a courtesy with a lifetime: once both retries are spent the
+      // pass runs anyway. A resting pointer used to defer forever, so a section
+      // the layer had stepped away from (or a host state it had not caught up
+      // with) stayed stale until the pointerout — the reported 'green is gone'
+      // while the user kept working in the sidebar.
+      const frozenNow = frozen()
+      const spent = retrySteps >= DEFER_RETRY_MS.length
+      if (frozenNow && !switched && !acting && !spent) {
         // Deferred, not dropped: pointerout / a store notification / a mutation
         // re-schedules once the freeze has lifted — and a bounded retry covers
         // the case where the pointer simply stays put and none of them comes.
@@ -2577,7 +2633,15 @@ export function client(ctx, deps) {
       }
       dirty = false
       if (acting) userActedHandled = true
-      reorder(switched || answering)
+      // The budget is refreshed by the freeze LIFTING, never by a pass that pierced
+      // it: refreshing it on every pass would re-arm the two retries after each
+      // one and turn the bounded retry into a pass every ~1.5s forever while the
+      // pointer rests inside the list.
+      if (!frozenNow) retrySteps = 0
+      // A forced pass never FLIPs: it lands on rows the host has already moved,
+      // and animating them under a resting cursor is the churn the freeze exists
+      // to prevent.
+      reorder(switched || answering || spent)
       idlePass()
     }, 0)
   }
@@ -2677,6 +2741,7 @@ export function client(ctx, deps) {
       if (typeof row.removeAttribute === 'function') row.removeAttribute(ZONE_ATTR)
     }
     zoneMarked.clear()
+    driftPasses.clear()
     styleTag.remove()
     styles.clear()
   }
