@@ -2186,6 +2186,84 @@ test('a pass is deferred while the pointer is inside the tree', async () => {
   }
 })
 
+test('a view-mode change pierces the freeze and restyles at once', async () => {
+  const now = Date.now()
+  const uiSession = makeUiSession({})
+  const sessions = [
+    session('b2', 'Beta two', now - 60 * 60 * 1000),
+    session('b3', 'Beta three', now - 3 * HOUR_MS),
+    session('b1', 'Beta one', now - 25 * HOUR_MS),
+  ]
+  const { rows, section, env, tearDown } = await mount({
+    sections: [{
+      title: 'w1',
+      rows: [rowSpec('b2', 'Beta two'), rowSpec('b3', 'Beta three'), rowSpec('b1', 'Beta one')],
+    }],
+    sessions,
+    workspaces: [{ workspaceId: 'w1', path: '/w1', title: 'w1', sessionIds: ['b2', 'b3', 'b1'] }],
+    uiSession,
+    storage: {
+      'dsh.workspace.view.v5': JSON.stringify({ groupBy: 'workspace', orderBy: 'updated', archivedFilter: 'default' }),
+    },
+  })
+  try {
+    assert.equal(rows.b1.style.order, '13', 'the dormant row starts behind the bar')
+    // The pointer is inside the tree when the user picks a different 分组方式:
+    // the host's menu closes right over the list, so the pointer sits on a row
+    // at the exact moment the view changes. This is the reported shape — native
+    // layout first, our restyle only once the pointer happens to leave.
+    env.listeners.pointerover[0]({
+      target: { closest: (sel) => (sel === '[role="tree"]' ? 'tree' : null) },
+    })
+    env.window.localStorage.setItem('dsh.workspace.view.v5', JSON.stringify({
+      groupBy: 'workspace-tree', orderBy: 'updated', archivedFilter: 'default',
+    }))
+    uiSession.setStatuses({ b1: RUNNING_STATUS })
+    env.flushTimers()
+    assert.equal(rows.b1.style.order, '12', 'the pass ran through the freeze')
+    assert.equal(rows.b1.style.display, undefined, 'the row joins the Active block without waiting for the pointer')
+    assert.equal(markerChild(section, 'fold-bar'), null, 'and the bar retires in the same pass')
+  } finally {
+    tearDown()
+  }
+})
+
+test('a deferred pass retries on its own when no signal ever comes', async () => {
+  const now = Date.now()
+  const uiSession = makeUiSession({})
+  const sessions = [
+    session('b2', 'Beta two', now - 60 * 60 * 1000),
+    session('b3', 'Beta three', now - 3 * HOUR_MS),
+    session('b1', 'Beta one', now - 25 * HOUR_MS),
+  ]
+  const { rows, env, tearDown } = await mount({
+    sections: [{
+      title: 'w1',
+      rows: [rowSpec('b2', 'Beta two'), rowSpec('b3', 'Beta three'), rowSpec('b1', 'Beta one')],
+    }],
+    sessions,
+    workspaces: [{ workspaceId: 'w1', path: '/w1', title: 'w1', sessionIds: ['b2', 'b3', 'b1'] }],
+    uiSession,
+  })
+  try {
+    // A row menu open inside the tree freezes every pass.
+    rows.b1.className = 'menuOpen'
+    uiSession.setStatuses({ b1: RUNNING_STATUS })
+    env.flushTimers()
+    assert.equal(rows.b1.style.order, '13', 'a pass defers while a row menu is open')
+    // The host closes the menu by dropping the class: no childList mutation (the
+    // observer watches childList only), no store traffic, no pointer event. The
+    // bounded retry is now the only thing that can recover the deferred pass.
+    rows.b1.className = ''
+    env.flushTimers()
+    env.flushTimers()
+    assert.equal(rows.b1.style.order, '12', 'the retry re-ran the deferred pass')
+    assert.equal(rows.b1.style.display, undefined, 'and the zone move landed with it')
+  } finally {
+    tearDown()
+  }
+})
+
 test('the bar folds the whole dormant block and reveals it again with its dots intact', async () => {
   const now = Date.now()
   const sessions = [
@@ -2235,6 +2313,91 @@ test('the bar folds the whole dormant block and reveals it again with its dots i
     assert.equal(rows.d1.style.display, 'none', 'a second click folds the block back')
     assert.equal(rows.d3.style.display, 'none')
     assert.equal(markerChild(section, 'fold-bar').children[0].children[1].textContent, '3 条历史会话')
+  } finally {
+    tearDown()
+  }
+})
+
+test('the bar opens on a click even while the pointer is inside the tree', async () => {
+  // Reported live: with the pointer parked over the sidebar, 【N 条历史会话】吞掉了
+  // 自己的点击 — the pointer is inevitably inside the tree when a real click lands
+  // (pointerover fires first), so the reveal must never wait for pointerout.
+  const now = Date.now()
+  const sessions = [
+    session('a1', 'Active one', now - 30 * 60 * 1000),
+    session('d1', 'Dormant one', now - 25 * HOUR_MS),
+    session('d2', 'Dormant two', now - 30 * HOUR_MS),
+  ]
+  const { rows, section, env, tearDown } = await mount({
+    sections: [{ title: 'w1', rows: sessions.map((s) => rowSpec(s.id, s.displayTitle)) }],
+    sessions,
+    workspaces: [{ workspaceId: 'w1', path: '/w1', title: 'w1', sessionIds: sessions.map((s) => s.id) }],
+    uiSession: makeUiSession({}),
+  })
+  try {
+    assert.equal(rows.d1.style.display, 'none', 'the dormant block starts folded')
+    env.listeners.pointerover[0]({
+      target: { closest: (sel) => (sel === '[role="tree"]' ? 'tree' : null) },
+    })
+    const bar = markerChild(section, 'fold-bar')
+    assert.ok(bar !== null, 'the fold bar is there to click')
+    bar.children[0].click()
+    env.flushTimers()
+    assert.equal(rows.d1.style.display, undefined, 'the click reveals the block at once')
+    assert.equal(rows.d2.style.display, undefined)
+    assert.equal(markerChild(section, 'fold-bar').children[0].children[1].textContent, '收起历史会话')
+    // The same click a moment later closes it again: the pierce is not a one-way
+    // door, and the pass that answers it must actually run the fold both ways.
+    markerChild(section, 'fold-bar').children[0].click()
+    env.flushTimers()
+    assert.equal(rows.d1.style.display, 'none', 'a second frozen click folds the block back')
+    assert.equal(rows.d2.style.display, 'none')
+    assert.equal(markerChild(section, 'fold-bar').children[0].children[1].textContent, '2 条历史会话')
+  } finally {
+    tearDown()
+  }
+})
+
+test('a frozen click on the bar still lets the proxied host expansion through', async () => {
+  // The host's own truncation is React state: the click only proxies it, and our
+  // layer converges on a LATER pass. With the pointer parked inside the tree that
+  // pass used to be frozen too, so the block stayed shut even though the host had
+  // been told to open it.
+  const now = Date.now()
+  const sessions = [
+    session('a1', 'Active one', now - 30 * 60 * 1000),
+    session('d1', 'Dormant one', now - 25 * HOUR_MS),
+  ]
+  const status = makeUiSession({})
+  const { rows, section, button, env, tearDown } = await mount({
+    sections: [{
+      title: 'w1',
+      rows: sessions.map((s) => rowSpec(s.id, s.displayTitle)),
+      button: 'collapsed',
+    }],
+    sessions,
+    workspaces: [{ workspaceId: 'w1', path: '/w1', title: 'w1', sessionIds: ['a1', 'd1'] }],
+    uiSession: status,
+  })
+  try {
+    button.textContent = '展开其余 2 个会话'
+    // The stub host: pressing it is what React's onClick would do — flip its own
+    // aria-expanded, and send NO store signal at all.
+    button.addEventListener('click', () => button.setAttribute('aria-expanded', 'true'))
+    env.listeners.pointerover[0]({
+      target: { closest: (sel) => (sel === '[role="tree"]' ? 'tree' : null) },
+    })
+    const bar = markerChild(section, 'fold-bar')
+    bar.children[0].click()
+    // The click's own pass, then the bounded follow-up that picks the host's new
+    // state up. THREE flushes: the timer body, the armed retry, and the pass that
+    // retry schedules.
+    env.flushTimers()
+    env.flushTimers()
+    env.flushTimers()
+    assert.equal(rows.d1.style.display, undefined, 'the proxied host expansion lands while frozen')
+    assert.equal(markerChild(section, 'fold-bar'), null, 'our bar retires: the host control is the reveal truth')
+    assert.equal(button.style.display, undefined, 'and the host button comes back')
   } finally {
     tearDown()
   }

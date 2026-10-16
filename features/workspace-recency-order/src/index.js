@@ -139,8 +139,13 @@
  *     "now" (it is active right now even if nothing was written for hours) and
  *     the 24h auto-collapse skips it; an unread completion never lifts a group.
  *   - anti-churn: while the pointer is inside the tree, or a row menu
- *     (`.menuOpen`) is open, all writes are deferred behind one dirty flag and
- *     re-run on pointerout / the next subscription event.
+ *     (`.menuOpen`) is open, ambient passes are deferred behind one dirty flag
+ *     and re-run on pointerout / the next subscription event, plus two bounded
+ *     retries (DEFER_RETRY_MS) so a deferral never waits on a signal that may
+ *     never arrive. ONE thing pierces the freeze: a change in the host's view
+ *     mode (分组方式 / 排序方式 / 筛选会话) restyles immediately with no FLIP — the
+ *     freeze protects the cursor from ambient churn, not the user from their own
+ *     click. The idle sub-pass never pierces (it clicks rows to collapse).
  *   - FLIP: rows that moved more than 4px are translated back to their old
  *     position for one frame, then animated over FLIP_MS (best-effort and
  *     scoped: skipped under prefers-reduced-motion, or where rAF /
@@ -295,6 +300,26 @@ const ACTIVE_MS = 24 * HOUR_MS
 
 /** Zone recompute cadence (ms): the Active/dormant boundary must not go stale. */
 const ZONE_TICK_MS = 5 * MINUTE_MS
+
+/**
+ * Deferred-pass retry cadences (ms, spec §7). A pass deferred by the churn
+ * freeze used to wait for the next external signal (pointerout, a store
+ * notification, a mutation) and nothing else — and with the pointer resting
+ * inside the tree every one of those signals re-defers, so a restyle could wait
+ * indefinitely. Two bounded retries close that hole; the cap keeps a pointer
+ * that simply stays put from costing a timer loop.
+ */
+const DEFER_RETRY_MS = [300, 1200]
+
+/**
+ * How long a user action on one of this feature's own controls keeps the churn
+ * freeze open (ms, spec §7). Long enough for the pass that answers the click
+ * PLUS the follow-up pass the proxied host control needs (opening the host's
+ * truncation is a React state change: our layer only converges on the very next
+ * pass, and that pass may well arrive as a bare DOM mutation), short enough that
+ * the freeze is back to protecting a resting cursor right after.
+ */
+const USER_ACTION_MS = 1000
 
 /** FLIP transition duration (ms) for rows that moved. */
 const FLIP_MS = 180
@@ -690,6 +715,20 @@ function viewOrdering() {
     saved: saved !== null && typeof saved === 'object' ? saved : undefined,
     archivedFilter,
   }
+}
+
+/**
+ * The host's view-mode signature: 分组方式 / 排序方式 / 筛选会话 as one string.
+ * A change here is the user explicitly asking for a different list, which is
+ * the one thing the churn freeze must never hold back (spec §7). Absent or
+ * unreadable state has its own stable signature, so a first read and a
+ * disappeared key are both detected exactly once, never repeatedly.
+ * @returns the joined signature of the three view options
+ */
+function viewSignature() {
+  const state = readViewStore()
+  if (state === null) return 'absent'
+  return `${state.groupBy}|${state.orderBy}|${state.archivedFilter}`
 }
 
 /**
@@ -1429,6 +1468,10 @@ function ensureFoldBar(section, data, key, text, expanded, order) {
     if (typeof button.addEventListener === 'function') {
       button.addEventListener('click', (event) => {
         if (event !== undefined && event !== null && typeof event.stopPropagation === 'function') event.stopPropagation()
+        // The click itself is the user's action: mark it before either branch so
+        // the pass that answers it runs even though the pointer is inside the
+        // tree (onUserAction, spec §7).
+        if (typeof data.onUserAction === 'function') data.onUserAction()
         // One bar drives both truncation systems (issue 4): while the host
         // truncates, the bar only proxies the host's own expand/collapse —
         // the host's aria-expanded state is then the single reveal truth.
@@ -2132,6 +2175,29 @@ export function client(ctx, deps) {
   let pointerInTree = false
   /** A pass was requested while frozen; it runs the moment the freeze lifts. */
   let dirty = false
+  /**
+   * The view-mode signature the previous scheduled pass saw, or null before the
+   * first one. A difference is a 分组方式 / 排序方式 / 筛选会话 click, which pierces
+   * the freeze (spec §7).
+   */
+  let lastViewSignature = null
+  /** Pending bounded retry of a deferred pass, or null (spec §7). */
+  let retryTimer = null
+  /** How many retries of the current deferral have already been armed. */
+  let retrySteps = 0
+  /**
+   * Timestamp until which a pass answers a user action and therefore pierces the
+   * freeze (spec §7). 0 = nothing pressed.
+   */
+  let userActedUntil = 0
+
+  /**
+   * True once the pass that ANSWERS the user action has run. Only that first pass
+   * skips the FLIP: a reveal lands on rows that were `display:none` (their rect is
+   * all zeros, so animating them means flying in from the page corner), while an
+   * ambient move that merely happens inside the same window still animates.
+   */
+  let userActedHandled = true
 
   const styleTag = document.createElement('style')
   styleTag.dataset.dshUxPlus = 'idle-collapse-css'
@@ -2200,6 +2266,25 @@ export function client(ctx, deps) {
     schedule()
   }
 
+  /**
+   * Note that the user just pressed the fold bar (spec §7). A real click ALWAYS
+   * arrives with the pointer already inside the tree — pointerover fires first —
+   * so without this the churn freeze deferred the very pass that answers the
+   * click, and the bar read as dead until the pointer happened to leave the
+   * sidebar (reported live as 【N 条历史会话】打不开). The freeze protects the
+   * cursor from AMBIENT churn, never from a click the user just made: passes are
+   * let through for USER_ACTION_MS (no FLIP — the state the user asked for should
+   * simply be there), and one bounded retry is armed so our layer converges on a
+   * proxied host control even when its state change sends no store signal at all.
+   * @returns {void}
+   */
+  function onUserAction() {
+    userActedUntil = Date.now() + USER_ACTION_MS
+    userActedHandled = false
+    schedule()
+    armRetry()
+  }
+
   /** Snapshot the live lists; null while either list is not ready. */
   function readData() {
     const sessionSnapshot = sessions.getSnapshot()
@@ -2245,6 +2330,7 @@ export function client(ctx, deps) {
       bands,
       zoneMarked,
       onToggleReveal,
+      onUserAction,
       styles,
     }
   }
@@ -2299,7 +2385,8 @@ export function client(ctx, deps) {
    * open inside it, a pass would move rows under the user's cursor or detach an
    * open popup's anchor. Passes are DEFERRED, never dropped — the flag makes
    * the running pass a no-op and the next event (pointerout, a store
-   * notification, a mutation) re-runs it once the freeze has lifted.
+   * notification, a mutation) re-runs it once the freeze has lifted, with two
+   * bounded retries covering the case where none of those events ever comes.
    */
   function frozen() {
     if (pointerInTree) return true
@@ -2356,13 +2443,22 @@ export function client(ctx, deps) {
     schedule()
   }
 
-  /** One full pass: structural find, then the two-layer reorder. */
-  function reorder() {
-    if (frozen()) {
+  /**
+   * One full pass: structural find, then the two-layer reorder.
+   * @param force - the host's view mode changed since the previous pass: run
+   * even while the freeze holds, and skip the FLIP (every row is moving because
+   * the user asked for a different view, so animating from the old positions
+   * would animate the very change they clicked for).
+   * @returns {void}
+   */
+  function reorder(force) {
+    if (frozen() && force !== true) {
       dirty = true
+      armRetry()
       return
     }
     dirty = false
+    retrySteps = 0
     const data = readData()
     if (data === null) {
       styles.clear()
@@ -2388,8 +2484,9 @@ export function client(ctx, deps) {
     flips.clear()
     // FLIP "First" (spec §8): the rows' tops before any order is written. Null
     // when the environment cannot animate (no rAF / no layout API / reduced
-    // motion), in which case the pass is exactly what it always was.
-    const tops = snapshotTops(found.tree)
+    // motion), in which case the pass is exactly what it always was; a forced
+    // (view-mode) pass settles instantly instead.
+    const tops = force === true ? null : snapshotTops(found.tree)
     styles.write(found.tree, 'display', 'flex')
     styles.write(found.tree, 'flexDirection', 'column')
     orderLevel(found.tree, roots, true, data, view)
@@ -2399,11 +2496,15 @@ export function client(ctx, deps) {
   /**
    * Idle sub-behavior pass: label every workspace row with activity and
    * collapse idle ones once. Independent of the reorder (a bail-out there
-   * never suppresses labels here); shares the same debounced schedule.
+   * never suppresses labels here); shares the same debounced schedule. Unlike
+   * the reorder this NEVER pierces the freeze: collapsing a workspace is a
+   * `row.click()` on a header, and doing that under a resting pointer is
+   * exactly the surprise the freeze exists to prevent.
    */
   function idlePass() {
     if (frozen()) {
       dirty = true
+      armRetry()
       return
     }
     const data = readData()
@@ -2453,16 +2554,47 @@ export function client(ctx, deps) {
     timer = window.setTimeout(function () {
       timer = null
       if (disposed) return
-      if (frozen()) {
+      // A 分组方式 / 排序方式 / 筛选会话 click is the user asking for a different
+      // list, and a click on the fold bar is the user asking for one block to
+      // open or close. The freeze protects the cursor from AMBIENT churn, never
+      // from the user's own action, so those passes pierce it (and skip the
+      // FLIP: the state they asked for should simply be there).
+      const signature = viewSignature()
+      const switched = lastViewSignature !== null && signature !== lastViewSignature
+      lastViewSignature = signature
+      // USER_ACTION_MS lets every pass through the freeze, so a proxied host
+      // control converges on the pass its own re-render schedules; only the first
+      // one is the pass that answers the click.
+      const acting = Date.now() < userActedUntil
+      const answering = acting && !userActedHandled
+      if (frozen() && !switched && !acting) {
         // Deferred, not dropped: pointerout / a store notification / a mutation
-        // re-schedules once the freeze has lifted.
+        // re-schedules once the freeze has lifted — and a bounded retry covers
+        // the case where the pointer simply stays put and none of them comes.
         dirty = true
+        armRetry()
         return
       }
       dirty = false
-      reorder()
+      if (acting) userActedHandled = true
+      reorder(switched || answering)
       idlePass()
     }, 0)
+  }
+
+  /**
+   * Arm the next bounded retry of a deferred pass (spec §7). The deferral used
+   * to depend on an external signal that a resting pointer re-defers forever;
+   * these two timers guarantee the pass eventually runs on its own.
+   * @returns {void}
+   */
+  function armRetry() {
+    if (retryTimer !== null || disposed || retrySteps >= DEFER_RETRY_MS.length) return
+    retryTimer = window.setTimeout(function () {
+      retryTimer = null
+      schedule()
+    }, DEFER_RETRY_MS[retrySteps])
+    retrySteps += 1
   }
 
   const observer = new MutationObserver(schedule)
@@ -2501,6 +2633,10 @@ export function client(ctx, deps) {
   return function cleanup() {
     disposed = true
     if (timer !== null) window.clearTimeout(timer)
+    if (retryTimer !== null && typeof window.clearTimeout === 'function') window.clearTimeout(retryTimer)
+    retryTimer = null
+    retrySteps = 0
+    lastViewSignature = null
     if (tickTimer !== null && typeof window.clearInterval === 'function') window.clearInterval(tickTimer)
     observer.disconnect()
     disposeSessions()
