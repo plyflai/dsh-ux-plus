@@ -62,6 +62,28 @@ function makeElement(tag) {
   el.querySelector = () => null
   el.querySelectorAll = () => []
   el.getBoundingClientRect = () => ({ left: 0, top: 0, right: 0, bottom: 0, width: 0, height: 0 })
+  /** True when this element carries the class name (string class only). */
+  el.hasClass = (name) => String(el.className || '').split(/\s+/).includes(name)
+  /**
+   * The density layer re-dresses a row's own text cells through
+   * querySelectorAll (`.title`, `.time`), so the fixture answers exactly that
+   * one selector — class names, descendants only, like the real DOM. Every
+   * other selector stays the free `null` / `[]` above, so no other code path
+   * can start finding elements a plain-object fixture cannot really model.
+   */
+  el.querySelectorAll = (selector) => {
+    const name = String(selector).startsWith('.') ? String(selector).slice(1) : null
+    if (name === null || name === '') return []
+    const found = []
+    const walk = (node) => {
+      for (const child of node.children || []) {
+        if (typeof child.hasClass === 'function' && child.hasClass(name)) found.push(child)
+        walk(child)
+      }
+    }
+    walk(el)
+    return found
+  }
   // Event surface (the liveness layer's fold button listens for clicks, and
   // the free element-level stubs above keep every other selector a no-op).
   el.listeners = {}
@@ -1465,113 +1487,11 @@ function markerChild(parent, value) {
 /** A host-shaped row spec: the row text starts with the displayTitle. */
 function rowSpec(id, title) { return { id, text: `${title}6分钟` } }
 
-test('classifyTier: precedence, the sticky band, the current session, archived', async () => {
-  const { classifyTier } = await import(
-    new URL('features/workspace-recency-order/src/index.js', root).href
-  )
-  const now = 1_700_000_000_000
-  const stale = now - 10 * HOUR_MS
-  // Precedence: pending > running > unread > time.
-  assert.equal(classifyTier({
-    now,
-    updatedAt: stale,
-    status: { pendingInteraction: { key: 'k' }, running: true, completionUnread: true },
-  }), 'pending', 'a blocking interaction outranks everything')
-  assert.equal(classifyTier({
-    now,
-    updatedAt: stale,
-    status: { running: true, completionUnread: true },
-  }), 'running')
-  assert.equal(classifyTier({ now, updatedAt: stale, status: { completionUnread: true } }), 'unread')
-  assert.equal(classifyTier({ now, updatedAt: stale, status: {} }), 'dormant')
-  // The time bands, including both band edges.
-  assert.equal(classifyTier({ now, updatedAt: now - HOUR_MS }), 'recent')
-  assert.equal(classifyTier({ now, updatedAt: now - 2 * HOUR_MS, prevTier: 'dormant' }), 'dormant',
-    'the band is sticky at its recent edge')
-  assert.equal(classifyTier({ now, updatedAt: now - 2.5 * HOUR_MS }), 'recent',
-    'the band defaults to recent without a memory')
-  assert.equal(classifyTier({ now, updatedAt: now - 2.5 * HOUR_MS, prevTier: 'dormant' }), 'dormant')
-  assert.equal(classifyTier({ now, updatedAt: now - 2.5 * HOUR_MS, prevTier: 'recent' }), 'recent')
-  assert.equal(classifyTier({ now, updatedAt: now - 3 * HOUR_MS, prevTier: 'recent' }), 'recent',
-    'the dormant edge is still the band')
-  assert.equal(classifyTier({ now, updatedAt: now - 4 * HOUR_MS, prevTier: 'recent' }), 'dormant',
-    'past the dormant edge the age wins over the memory')
-  // The session you are looking at is a full row, however old it is.
-  assert.equal(classifyTier({ now, updatedAt: stale, isCurrent: true }), 'recent')
-  // Archived rows are dormant for good: the caller then leaves them alone.
-  assert.equal(classifyTier({
-    now,
-    updatedAt: now,
-    archived: true,
-    status: { pendingInteraction: { key: 'k' }, running: true, completionUnread: true },
-  }), 'dormant')
-})
-
-test('attentionBadgeText: zh/en, zero parts omitted, empty when nothing is hidden', async () => {
-  const { attentionBadgeText } = await import(
-    new URL('features/workspace-recency-order/src/index.js', root).href
-  )
-  assert.equal(attentionBadgeText('zh', { pending: 2, unread: 1 }), '2 待回复 · 1 未读')
-  assert.equal(attentionBadgeText('zh-Hans', { pending: 2, unread: 1 }), '2 待回复 · 1 未读',
-    'any zh locale id')
-  assert.equal(attentionBadgeText('zh', { pending: 0, unread: 3 }), '3 未读', 'the zero part is omitted')
-  assert.equal(attentionBadgeText('zh', { pending: 1, unread: 0 }), '1 待回复')
-  assert.equal(attentionBadgeText('en', { pending: 2, unread: 1 }), '2 waiting · 1 unread')
-  assert.equal(attentionBadgeText('en-US', { pending: 0, unread: 1 }), '1 unread')
-  assert.equal(attentionBadgeText('zh', { pending: 0, unread: 0 }), '')
-  assert.equal(attentionBadgeText('en', {}), '', 'missing counts are zero')
-  assert.equal(attentionBadgeText('zh', undefined), '')
-})
-
-test('liveness ranks pending, running, unread, recency, dormant and styles each row', async () => {
-  const now = Date.now()
-  const uiSession = makeUiSession({
-    p1: PENDING_STATUS, r1: RUNNING_STATUS, u1: UNREAD_STATUS, u2: UNREAD_STATUS,
-  })
-  const titles = {
-    c1: 'C one', d1: 'D one', u1: 'U one', r1: 'R one', p1: 'P one', u2: 'U two',
-  }
-  // The host renders the section's members newest first (its recency
-  // projection) — that is the DOM order the row layer must pair against.
-  const domOrder = ['c1', 'd1', 'u1', 'r1', 'p1', 'u2']
-  const { rows, section, tearDown } = await mount({
-    sections: [{ title: 'w1', rows: domOrder.map((id) => rowSpec(id, titles[id])) }],
-    sessions: [
-      session('c1', titles.c1, now - 30 * 60 * 1000),
-      session('d1', titles.d1, now - 10 * HOUR_MS),
-      session('u1', titles.u1, now - 20 * HOUR_MS),
-      session('r1', titles.r1, now - 25 * HOUR_MS),
-      session('p1', titles.p1, now - 30 * HOUR_MS),
-      session('u2', titles.u2, now - 8 * DAY_MS),
-    ],
-    // The member order differs from the rendered order, as in the host.
-    workspaces: [{ workspaceId: 'w1', path: '/w1', title: 'w1', sessionIds: ['p1', 'u1', 'c1', 'r1', 'u2', 'd1'] }],
-    uiSession,
-  })
-  try {
-    assert.equal(rows.p1.style.order, '10', 'a pending interaction pins first')
-    assert.equal(rows.r1.style.order, '11', 'a running session pins next')
-    assert.equal(rows.u1.style.order, '12', 'then unread completions')
-    assert.equal(rows.u2.style.order, '13', 'inside a tier, recency decides')
-    assert.equal(rows.c1.style.order, '14', 'then the recent rows')
-    assert.equal(rows.d1.style.order, '15', 'dormant rows last')
-    // Density is written on the row element inside the flex item.
-    assert.equal(rowEl(rows.p1).style.fontSize, undefined, 'pending keeps the full row')
-    assert.equal(rowEl(rows.r1).style.opacity, undefined, 'running keeps the full row')
-    assert.equal(rowEl(rows.c1).style.fontSize, undefined, 'recent keeps the full row')
-    assert.equal(rowEl(rows.u1).style.paddingBlock, '1px', 'unread becomes a micro row')
-    assert.equal(rowEl(rows.u1).style.fontSize, '11px')
-    assert.equal(rowEl(rows.u1).style.opacity, '0.8')
-    assert.equal(rowEl(rows.u2).style.opacity, '0.55', 'a stale unread row fades, it never hides')
-    assert.equal(rowEl(rows.u2).style.fontSize, '11px', 'stale unread is still a micro row')
-    assert.equal(rowEl(rows.d1).style.paddingBlock, '2px', 'dormant is a compact row')
-    assert.equal(rowEl(rows.d1).style.fontSize, '11px')
-    assert.equal(rowEl(rows.d1).style.opacity, '0.65')
-    assert.equal(markerChild(section, 'fold-row'), null, 'one dormant row folds nothing')
-  } finally {
-    tearDown()
-  }
-})
+// ---------------------------------------------------------------------------
+// Zone layer (spec §1-§5): the Active/dormant partition, the row dots, the
+// dormant bar and the Active-zone badge. The pure helpers are asserted
+// directly; the DOM tests drive the real feature client through the fixture.
+// ---------------------------------------------------------------------------
 
 /** The section's header row (role=treeitem carrying aria-expanded). */
 function headerOf(built) {
@@ -1593,82 +1513,335 @@ function actionsOf(header) {
   return null
 }
 
-test('attention badge: only the attention that is hidden gets counted', async () => {
-  const now = Date.now()
-  const titles = { p1: 'P one', p2: 'P two', u1: 'U one' }
-  const ordinary = ['o1', 'o2', 'o3', 'o4', 'o5']
-  const sessions = [
-    session('p1', titles.p1, now - 30 * HOUR_MS),
-    session('p2', titles.p2, now - 31 * HOUR_MS),
-    session('u1', titles.u1, now - 32 * HOUR_MS),
-    ...ordinary.map((id, i) => session(id, `O ${i + 1}`, now - (30 + 10 * i) * 60 * 1000)),
-  ]
-  const statuses = { p1: PENDING_STATUS, p2: PENDING_STATUS, u1: UNREAD_STATUS }
-  const members = ['o1', 'o2', 'o3', 'o4', 'o5', 'p1', 'p2', 'u1']
-  const workspaces = [{ workspaceId: 'w1', path: '/w1', title: 'w1', sessionIds: members }]
-  const specs = (ids) => ids.map((id) => ({ id, text: `${id === 'u1' ? titles.u1 : id.startsWith('p') ? titles[id] : `O ${Number(id[1])}`}6分钟` }))
+/**
+ * The feature's status dot anywhere in a row. The host row nests it one level
+ * down (inside the leading slot, ahead of the host's own dot), a bare fixture
+ * row takes it as a direct child — both must be found, and found only ONCE.
+ */
+function dotIn(row) {
+  for (const child of row.children) {
+    if (child.dataset !== undefined && child.dataset.dshUxPlus === 'session-status-dot') return child
+    for (const inner of child.children) {
+      if (inner.dataset !== undefined && inner.dataset.dshUxPlus === 'session-status-dot') return inner
+    }
+  }
+  return null
+}
 
-  // (a) A collapsed workspace renders NO rows beyond the host quota. The
-  // count therefore cannot come from the DOM: it is workspace.sessionIds
-  // crossed with the status snapshot.
-  const collapsed = await mount({
-    sections: [{ title: 'w1', rows: [], collapsed: true, actions: true }],
+/** Every status dot in a row (a duplicate would mean an unstable pass). */
+function dotsIn(row) {
+  const found = []
+  for (const child of row.children) {
+    if (child.dataset !== undefined && child.dataset.dshUxPlus === 'session-status-dot') found.push(child)
+    for (const inner of child.children) {
+      if (inner.dataset !== undefined && inner.dataset.dshUxPlus === 'session-status-dot') found.push(inner)
+    }
+  }
+  return found
+}
+
+test('zoneOf: the 24h boundary, a running session, and every status older than a day', async () => {
+  const { zoneOf } = await import(
+    new URL('features/workspace-recency-order/src/index.js', root).href
+  )
+  const now = 1_700_000_000_000
+  assert.equal(zoneOf({ now, updatedAt: now - 23 * HOUR_MS - 59 * 60 * 1000 }), 'active',
+    '23h59m of silence is still Active')
+  assert.equal(zoneOf({ now, updatedAt: now - DAY_MS }), 'active', 'the boundary itself is Active')
+  assert.equal(zoneOf({ now, updatedAt: now - DAY_MS - 60 * 1000 }), 'dormant', '24h01m is dormant')
+  assert.equal(zoneOf({ now, updatedAt: now - 8 * DAY_MS }), 'dormant')
+  // running is the one status that holds a row Active regardless of time.
+  assert.equal(zoneOf({ now, updatedAt: now - 8 * DAY_MS, status: { running: true } }), 'active')
+  assert.equal(zoneOf({
+    now,
+    updatedAt: now - 8 * DAY_MS,
+    status: { running: false, completionUnread: true },
+  }), 'dormant', 'an unread completion never holds a row Active past 24h')
+  assert.equal(zoneOf({
+    now,
+    updatedAt: now - 8 * DAY_MS,
+    status: { pendingInteraction: { key: 'approval:1' }, running: false },
+  }), 'dormant', 'a stale blocking interaction no longer pins the row to the top')
+  assert.equal(zoneOf({ now, updatedAt: undefined }), 'dormant')
+})
+
+test('statusOf: pendingInteraction outranks running outranks unread', async () => {
+  const { statusOf } = await import(
+    new URL('features/workspace-recency-order/src/index.js', root).href
+  )
+  assert.equal(statusOf({
+    pendingInteraction: { key: 'k' }, running: true, completionUnread: true,
+  }), 'waiting')
+  assert.equal(statusOf({ running: true, completionUnread: true }), 'running')
+  assert.equal(statusOf({ completionUnread: true }), 'unread')
+  assert.equal(statusOf({ running: false, completionUnread: false }), 'none')
+  assert.equal(statusOf({}), 'none')
+  assert.equal(statusOf(undefined), 'none')
+  assert.equal(statusOf(null), 'none')
+})
+
+test('the zone copy: bar text, dot labels and the badge tooltip (zh/en)', async () => {
+  const { foldBarText, statusLabel, badgeKinds, badgeTooltip } = await import(
+    new URL('features/workspace-recency-order/src/index.js', root).href
+  )
+  assert.equal(foldBarText('zh-CN', 7), '7 条历史会话')
+  assert.equal(foldBarText('en-US', 7), '7 earlier sessions')
+  assert.equal(foldBarText('en', 0), '0 earlier sessions', 'a zero count is still a count')
+  assert.equal(statusLabel('zh-CN', 'waiting'), '待回复')
+  assert.equal(statusLabel('zh-CN', 'running'), '运行中')
+  assert.equal(statusLabel('zh-CN', 'unread'), '未读')
+  assert.equal(statusLabel('en-US', 'waiting'), 'waiting')
+  assert.equal(statusLabel('en-US', 'running'), 'running')
+  assert.equal(statusLabel('en-US', 'unread'), 'unread')
+  assert.equal(statusLabel('en-US', 'none'), '', 'a dot that does not exist has no label')
+  // Badge dots: at most three, always in the same reading order.
+  assert.deepEqual(badgeKinds({ pending: 2, unread: 1, running: 1 }), ['waiting', 'unread', 'running'])
+  assert.deepEqual(badgeKinds({ running: 3 }), ['running'])
+  assert.deepEqual(badgeKinds({ pending: 0, unread: 0, running: 0 }), [])
+  assert.deepEqual(badgeKinds({}), [])
+  // The tooltip keeps the count text: hover and screen readers read one string.
+  assert.equal(badgeTooltip('zh-CN', { pending: 2, unread: 1 }), '2 待回复 · 1 未读')
+  assert.equal(badgeTooltip('en-US', { pending: 2, unread: 1 }), '2 waiting · 1 unread')
+  assert.equal(badgeTooltip('zh-CN', { pending: 1, running: 2 }), '1 待回复 · 2 运行中')
+  assert.equal(badgeTooltip('zh-CN', { unread: 2 }), '2 未读', 'zero parts are omitted')
+  assert.equal(badgeTooltip('zh-CN', {}), '')
+  assert.equal(badgeTooltip('zh-CN', undefined), '')
+})
+
+test('the Active block leads and wears one green band, the dormant block folds behind the bar', async () => {
+  const now = Date.now()
+  const sessions = [
+    session('a1', 'Active one', now - 30 * 60 * 1000),
+    session('a2', 'Active two', now - 10 * HOUR_MS),
+    session('a3', 'Active three', now - 20 * HOUR_MS),
+    session('d1', 'Dormant one', now - 25 * HOUR_MS),
+    session('d2', 'Dormant two', now - 30 * HOUR_MS),
+    session('d3', 'Dormant three', now - 8 * DAY_MS),
+  ]
+  const workspaces = [{
+    workspaceId: 'w1', path: '/w1', title: 'w1', sessionIds: sessions.map((s) => s.id),
+  }]
+  const status = makeUiSession({})
+  const { rows, section, env, tearDown } = await mount({
+    sections: [{ title: 'w1', rows: sessions.map((s) => rowSpec(s.id, s.displayTitle)) }],
     sessions,
     workspaces,
-    uiSession: makeUiSession(statuses),
+    uiSession: status,
   })
   try {
+    // Inside the Active zone: lastActive desc, so rank 10 is the freshest.
+    assert.equal(rows.a1.style.order, '10')
+    assert.equal(rows.a2.style.order, '11')
+    assert.equal(rows.a3.style.order, '12')
+    // One rank slot is left between the blocks for the bar (spec §4).
+    const bar = markerChild(section, 'fold-bar')
+    assert.ok(bar !== null, 'the whole dormant block folds behind the bar')
+    assert.equal(bar.style.order, '13', 'the bar owns the rank between the blocks')
+    assert.equal(rows.d1.style.order, '14')
+    assert.equal(rows.d2.style.order, '15')
+    assert.equal(rows.d3.style.order, '16')
+    assert.equal(bar.children[0].children[1].textContent, '3 条历史会话')
+    assert.equal(bar.children[0].getAttribute('aria-expanded'), 'false')
+    // Hidden, but still in the DOM: the replay count and the pairing stay valid.
+    assert.equal(rows.d1.style.display, 'none')
+    assert.equal(rows.d2.style.display, 'none')
+    assert.equal(rows.d3.style.display, 'none')
+    assert.equal(rows.a1.style.display, undefined)
+    // Density: ONE compact box for the whole list — the Active block is told
+    // apart by its band, never by a taller row (user rule) — and the dormant
+    // block differs only by its fade.
+    assert.equal(rowEl(rows.a1).style.paddingBlock, '1px')
+    assert.equal(rowEl(rows.a1).style.paddingInlineEnd, '6px')
+    assert.equal(rowEl(rows.a1).style.boxSizing, 'border-box')
+    // The leading pad is the host's `calc(8px + var(--dsh-workspace-indent))`
+    // (Rows.module.css:8): no inline shorthand may flatten the tree indent.
+    assert.equal(rowEl(rows.a1).style.paddingInline, undefined)
+    assert.equal(rowEl(rows.a1).style.paddingInlineStart, undefined)
+    assert.equal(rowEl(rows.a1).style.gap, '4px')
+    assert.equal(rowEl(rows.a1).style.height, '26px')
+    assert.equal(rowEl(rows.a2).style.height, '26px')
+    assert.equal(rowEl(rows.a1).style.opacity, undefined)
+    assert.equal(rowEl(rows.d1).style.opacity, '0.5')
+    assert.equal(rowEl(rows.d1).style.paddingBlock, '1px', 'a dormant row wears the same compact box')
+    assert.equal(rowEl(rows.d1).style.height, '26px')
+    // One band behind the WHOLE block (user rule): a single positioned element
+    // measured over the block, never a background per row — the host's own
+    // hover/selected backgrounds paint on top of it.
+    assert.equal(rowEl(rows.a1).getAttribute('data-dsh-ux-zone'), 'active')
+    assert.equal(rowEl(rows.a2).getAttribute('data-dsh-ux-zone'), 'active')
+    assert.equal(rowEl(rows.d1).getAttribute('data-dsh-ux-zone'), null, 'dormant rows carry no zone mark')
+    assert.equal(rowEl(rows.a1).style.background, undefined, 'no inline background on a row')
+    const band = markerChild(section, 'zone-band')
+    assert.ok(band !== null, 'the Active block wears one shared band')
+    // Paint order: the band is z-index:-1, which needs the section to be a
+    // stacking context (isolation) or it sinks behind the panel background.
+    assert.equal(section.style.isolation, 'isolate', 'the section isolates so the band paints')
+    // Geometry comes from client rects, so no offsetParent claim is needed.
+    assert.equal(section.style.position, undefined, 'rects make position:relative unnecessary')
+    // Geometry: the band spans first row top → last row bottom (rects are
+    // layout truth; a re-pass re-measures them).
+    rows.a1.getBoundingClientRect = () => ({ top: 100, bottom: 126, height: 26 })
+    rows.a2.getBoundingClientRect = () => ({ top: 126, bottom: 152, height: 26 })
+    rows.a3.getBoundingClientRect = () => ({ top: 152, bottom: 178, height: 26 })
+    section.getBoundingClientRect = () => ({ top: 100, bottom: 400, height: 300 })
+    status.setStatuses({})
+    env.flushTimers()
+    assert.equal(band.style.top, '0px')
+    assert.equal(band.style.height, '78px', 'the band covers all three compact Active rows')
+    // The band and the selected-green override live in the style tag, keyed on
+    // attributes — the host's gray selected class (0,1,0) loses to (0,2,0).
+    const styleText = env.document.head.children
+      .map((el) => (el.textContent === undefined ? '' : el.textContent)).join('\n')
+    assert.ok(styleText.includes('[data-dsh-ux-plus="zone-band"]'), 'the band paints through the style tag')
+    assert.ok(styleText.includes('[data-dsh-ux-zone="active"][aria-selected="true"]'),
+      'a selected row inside the band turns green, not gray')
+  } finally {
+    tearDown()
+  }
+})
+
+test('row dots: waiting breathes orange, running is a blue ring, unread is a green dot', async () => {
+  const now = Date.now()
+  const sessions = [
+    session('p1', 'Pending one', now - 30 * 60 * 1000),
+    session('r1', 'Running one', now - 40 * 60 * 1000),
+    session('u1', 'Unread one', now - 50 * 60 * 1000),
+    session('c1', 'Calm one', now - 60 * 60 * 1000),
+  ]
+  const workspaces = [{
+    workspaceId: 'w1', path: '/w1', title: 'w1', sessionIds: sessions.map((s) => s.id),
+  }]
+  const status = makeUiSession({ p1: PENDING_STATUS, r1: RUNNING_STATUS, u1: UNREAD_STATUS })
+  const { rows, env, tearDown } = await mount({
+    sections: [{ title: 'w1', rows: sessions.map((s) => rowSpec(s.id, s.displayTitle)) }],
+    sessions,
+    workspaces,
+    uiSession: status,
+  })
+  try {
+    const waiting = dotIn(rowEl(rows.p1))
+    assert.ok(waiting !== null, 'the waiting row wears its dot')
+    assert.equal(waiting.dataset.dshUxKind, 'waiting')
+    assert.equal(waiting.style.width, '7px')
+    assert.equal(waiting.style.height, '7px')
+    assert.equal(waiting.style.borderRadius, '50%')
+    assert.equal(waiting.style.backgroundColor, '#f59e0b')
+    assert.equal(waiting.getAttribute('title'), '待回复')
+    assert.equal(waiting.getAttribute('aria-label'), '待回复')
+    assert.equal(waiting.getAttribute('role'), 'img')
+    const running = dotIn(rowEl(rows.r1))
+    assert.equal(running.dataset.dshUxKind, 'running')
+    assert.equal(running.style.backgroundColor, '', 'a ring has no fill')
+    assert.equal(running.style.border, '2px solid #3b82f6')
+    assert.equal(running.style.borderTopColor, 'transparent', 'the gap is what makes it read as spinning')
+    assert.equal(running.getAttribute('aria-label'), '运行中')
+    const unread = dotIn(rowEl(rows.u1))
+    assert.equal(unread.dataset.dshUxKind, 'unread')
+    assert.equal(unread.style.backgroundColor, '#22c55e')
+    assert.equal(unread.getAttribute('title'), '未读')
+    assert.equal(dotIn(rowEl(rows.c1)), null, 'no status at all, no dot')
+    // The host's own dot is hidden, never doubled, and handed back on dispose.
+    const slot = rowEl(rows.p1)
+    const host = env.document.createElement('span')
+    host.setAttribute('data-state', 'warning')
+    slot.appendChild(host)
+    status.setStatuses({ p1: PENDING_STATUS, r1: RUNNING_STATUS, u1: UNREAD_STATUS })
+    env.flushTimers()
+    assert.equal(host.style.display, 'none', 'the host dot steps aside while ours is up')
+    assert.equal(dotsIn(slot).length, 1, 'a second pass repaints the dot, it never stacks one')
+    // A waiting row that starts running swaps the dot in place, and a row that
+    // loses its status gets the host's own dot back.
+    status.setStatuses({ p1: RUNNING_STATUS, r1: RUNNING_STATUS, u1: UNREAD_STATUS })
+    env.flushTimers()
+    assert.equal(dotsIn(slot).length, 1)
+    assert.equal(dotIn(slot).dataset.dshUxKind, 'running')
+    status.setStatuses({ r1: RUNNING_STATUS, u1: UNREAD_STATUS })
+    env.flushTimers()
+    assert.equal(dotIn(slot), null, 'the dot is taken back out')
+    assert.equal(host.style.display, undefined, 'and the host dot shows again')
+    assert.equal(host.getAttribute('data-state'), 'warning', 'the host element itself is untouched')
+  } finally {
+    tearDown()
+  }
+})
+
+test('the header badge holds Active-zone dots only: waiting, unread, running', async () => {
+  const now = Date.now()
+  // A collapsed workspace whose only visible slice is five rows: the badge
+  // speaks for the Active-zone attention the DOM cannot show, and says nothing
+  // about a dormant member's status, however loud it is.
+  const sessions = [
+    session('a1', 'Active one', now - 30 * 60 * 1000),
+    session('a2', 'Active two', now - 40 * 60 * 1000),
+    session('o1', 'O one', now - 60 * 60 * 1000),
+    session('o2', 'O two', now - 2 * HOUR_MS),
+    session('o3', 'O three', now - 3 * HOUR_MS),
+    session('o4', 'O four', now - 4 * HOUR_MS),
+    session('o5', 'O five', now - 5 * HOUR_MS),
+    session('d1', 'Dormant one', now - 30 * HOUR_MS),
+  ]
+  const workspaces = [{
+    workspaceId: 'w1', path: '/w1', title: 'w1', sessionIds: sessions.map((s) => s.id),
+  }]
+  const collapsed = await mount({
+    sections: [{
+      title: 'w1',
+      collapsed: true,
+      actions: true,
+      rows: ['a1', 'a2', 'o1', 'o2', 'o3'].map((id) => rowSpec(id, sessions.find((s) => s.id === id).displayTitle)),
+    }],
+    sessions,
+    workspaces,
+    uiSession: makeUiSession({ a1: PENDING_STATUS, a2: UNREAD_STATUS, d1: PENDING_STATUS }),
+  })
+  try {
+    const badge = markerChild(headerOf(collapsed), 'attention-badge')
+    assert.ok(badge !== null, 'the collapsed workspace carries the attention it hides')
+    assert.equal(badge.getAttribute('title'), '1 待回复 · 1 未读',
+      'the dormant member counts for nothing: only the Active zone floats up')
+    assert.equal(badge.getAttribute('aria-label'), '1 待回复 · 1 未读')
+    assert.equal(badge.getAttribute('role'), 'img')
+    assert.equal(badge.children.length, 2, 'one dot per kind, at most three')
+    assert.deepEqual(badge.children.map((dot) => dot.dataset.dshUxKind), ['waiting', 'unread'])
+    assert.equal(badge.children[0].style.backgroundColor, '#f59e0b')
+    assert.equal(badge.children[1].style.backgroundColor, '#22c55e')
     const header = headerOf(collapsed)
-    const badge = markerChild(header, 'attention-badge')
-    assert.ok(badge !== null, 'the collapsed header carries the attention it hides')
-    assert.equal(badge.textContent, '2 待回复 · 1 未读')
-    assert.equal(header.children.indexOf(badge), header.children.indexOf(actionsOf(header)) - 1,
-      'the badge sits immediately before the actions span')
-    assert.deepEqual(collapsed.rows, {}, 'no row is in the collapsed DOM')
-    assert.equal(badge.style.flex, 'none', 'the badge is the header element, not a row')
+    const actions = actionsOf(header)
+    assert.ok(actions !== null, 'the fixture header carries its actions span')
+    assert.equal(header.children.indexOf(badge), header.children.indexOf(actions) - 1,
+      'the badge sits immediately before the actions, like the age label')
   } finally {
     collapsed.tearDown()
   }
 
-  // (b) Expanded with nothing out of view: attention is on screen, so the
-  // header stays bare.
-  const expanded = await mount({
-    sections: [{ title: 'w1', rows: specs([...ordinary, 'p1', 'p2', 'u1']) }],
-    sessions,
-    workspaces,
-    uiSession: makeUiSession(statuses),
-  })
-  try {
-    const header = headerOf(expanded)
-    assert.equal(markerChild(header, 'attention-badge'), null)
-    assert.equal(expanded.rows.p1.style.order, '10', 'the pinned row is on screen, so no badge')
-  } finally {
-    expanded.tearDown()
-  }
-
-  // (c) Expanded but the host is truncating: only the attention that the
-  // quota leaves out is counted, and clearing it takes the badge away.
-  const clearing = makeUiSession(statuses)
+  // Expanded but truncated by the host quota: the badge counts the run that
+  // sits beyond the rendered slice, and only while a host overflow button
+  // exists (an expanded workspace with everything visible needs no badge).
+  const running = session('r1', 'Running one', now - 6 * HOUR_MS)
   const truncated = await mount({
-    sections: [{ title: 'w1', rows: specs(['o1', 'o2', 'o3', 'o4', 'o5']), button: 'expanded' }],
-    sessions,
-    workspaces,
-    uiSession: clearing,
+    sections: [{
+      title: 'w1',
+      actions: true,
+      rows: ['o1', 'o2', 'o3', 'o4', 'o5'].map((id) => rowSpec(id, `O ${['one', 'two', 'three', 'four', 'five'][Number(id[1]) - 1]}`)),
+      button: 'expanded',
+    }],
+    sessions: [...sessions, running],
+    workspaces: [{
+      workspaceId: 'w1', path: '/w1', title: 'w1',
+      sessionIds: [...sessions.map((s) => s.id), 'r1'],
+    }],
+    uiSession: makeUiSession({ r1: RUNNING_STATUS }),
   })
   try {
-    const header = headerOf(truncated)
-    const badge = markerChild(header, 'attention-badge')
-    assert.ok(badge !== null, 'the rows the quota hides are the rows the badge counts')
-    assert.equal(badge.textContent, '2 待回复 · 1 未读')
-    assert.equal(truncated.rows.p1, undefined, 'the pinned rows are genuinely absent')
-    clearing.setStatuses({})
-    truncated.env.flushTimers()
-    assert.equal(markerChild(header, 'attention-badge'), null, 'no attention left, no badge left')
+    const badge = markerChild(headerOf(truncated), 'attention-badge')
+    assert.ok(badge !== null, 'the truncated Active-zone run is what the header speaks for')
+    assert.equal(badge.getAttribute('title'), '1 运行中')
+    assert.equal(running.id, 'r1')
+    assert.equal(truncated.rows.r1, undefined, 'the running row is genuinely absent from the DOM')
   } finally {
     truncated.tearDown()
   }
 })
-
 test('a workspace holding a blocking-attention member is never auto-collapsed', async () => {
   const now = Date.now()
   const sessions = [
@@ -1739,143 +1912,124 @@ test('a workspace with a pending member outranks a fresher-activity workspace', 
     assert.equal(sections[0].section.style.order, '1')
     assert.equal(sections[1].section.style.marginTop, '0px')
     assert.equal(sections[0].section.style.marginTop, '4px')
-    assert.equal(sections[1].rows.p1.style.order, '10', 'the row layer is untouched by the group boost')
+    // The row layer is untouched by the group boost: each section still ranks
+    // its own rows. That pending member is 30 hours old, so it now waits in the
+    // dormant zone behind its bar — the bar takes rank 10 and the row follows it
+    // — while the group layer above still treats it as blocking attention.
+    assert.equal(markerChild(sections[1].section, 'fold-bar').style.order, '10',
+      'the dormant bar takes the rank between the blocks')
+    assert.equal(sections[1].rows.p1.style.order, '11', 'the row layer is untouched by the group boost')
+    assert.equal(sections[1].rows.p1.style.display, 'none', 'a dormant pending row is folded')
     assert.equal(rows.f1.style.order, '10', 'each section still ranks its own rows')
   } finally {
     tearDown()
   }
 })
 
-test('dispose removes every fold row, badge and marker and restores the styles', async () => {
+test('dispose takes back every dot, the bar and the zone marks and restores the host rows', async () => {
   const now = Date.now()
-  const domOrder = ['c1', 'd1', 'd2', 'd3', 'd4']
-  const titles = { c1: 'C one', d1: 'D one', d2: 'D two', d3: 'D three', d4: 'D four', p1: 'P one' }
-  const status = makeUiSession({ p1: PENDING_STATUS })
-  const { sections, rows, env, dispose, tearDown } = await mount({
-    sections: [
-      {
-        title: 'wf',
-        rows: domOrder.map((id) => ({ id, text: `${titles[id]}6分钟` })),
-        button: 'expanded',
-      },
-      { title: 'wc', rows: [], collapsed: true, actions: true },
-    ],
-    sessions: [
-      session('c1', 'C one', now - 30 * 60 * 1000),
-      session('d1', 'D one', now - 4 * HOUR_MS),
-      session('d2', 'D two', now - 5 * HOUR_MS),
-      session('d3', 'D three', now - 6 * HOUR_MS),
-      session('d4', 'D four', now - 7 * HOUR_MS),
-      session('p1', 'P one', now - 30 * HOUR_MS),
-    ],
-    workspaces: [
-      { workspaceId: 'wf', path: '/wf', title: 'wf', sessionIds: domOrder },
-      { workspaceId: 'wc', path: '/wc', title: 'wc', sessionIds: ['p1'] },
-    ],
+  const sessions = [
+    session('a1', 'Active one', now - 30 * 60 * 1000),
+    session('a2', 'Active two', now - 2 * HOUR_MS),
+    session('d1', 'Dormant one', now - 25 * HOUR_MS),
+    session('d2', 'Dormant two', now - 26 * HOUR_MS),
+  ]
+  const workspaces = [{
+    workspaceId: 'w1', path: '/w1', title: 'w1', sessionIds: sessions.map((s) => s.id),
+  }]
+  const status = makeUiSession({ a1: PENDING_STATUS })
+  const { rows, section, env, dispose, tearDown } = await mount({
+    sections: [{ title: 'w1', rows: sessions.map((s) => rowSpec(s.id, s.displayTitle)) }],
+    sessions,
+    workspaces,
     uiSession: status,
   })
-  const [folded, collapsed] = sections
-  const badgeHeader = headerOf(collapsed)
   try {
-    assert.ok(markerChild(folded.section, 'fold-row') !== null, 'the fold row exists before dispose')
-    assert.equal(rows.d4.style.display, 'none', 'and hides a row')
-    assert.ok(markerChild(badgeHeader, 'attention-badge') !== null, 'and a badge exists')
-    assert.equal(status.subscribeCount(), 1, 'the status observable is subscribed')
-    assert.equal(env.listeners.pointerover.length, 1, 'the freeze listeners are installed')
-    assert.equal(env.listeners.pointerout.length, 1)
-
+    assert.ok(markerChild(section, 'fold-bar') !== null, 'the zone layer is up')
+    assert.ok(dotIn(rowEl(rows.a1)) !== null)
+    assert.equal(rowEl(rows.a1).getAttribute('data-dsh-ux-zone'), 'active')
+    assert.equal(rows.d1.style.display, 'none')
+    const host = env.document.createElement('span')
+    host.setAttribute('data-state', 'warning')
+    rowEl(rows.a2).appendChild(host)
+    status.setStatuses({ a1: PENDING_STATUS, a2: UNREAD_STATUS })
+    env.flushTimers()
+    assert.equal(host.style.display, 'none', 'the host dot was hidden by a pass')
     dispose()
-
-    assert.equal(markerChild(folded.section, 'fold-row'), null, 'the fold row is removed')
-    assert.equal(markerChild(badgeHeader, 'attention-badge'), null, 'the badge is removed')
-    assert.equal(rows.d4.style.display, undefined, 'the folded row is restored')
-    assert.equal(rows.d4.style.order, undefined, 'every written style is restored')
-    assert.equal(folded.section.style.order, undefined, 'the section styles are restored')
-    assert.equal(status.subscribeCount(), 0, 'the status subscription is dropped')
-    assert.equal(env.listeners.pointerover.length, 0, 'the freeze listeners are removed')
-    assert.equal(env.listeners.pointerout.length, 0)
-    for (const child of folded.section.children) {
-      assert.equal(child.dataset.dshUxPlus, undefined, 'no marker survives dispose')
-    }
+    assert.equal(markerChild(section, 'fold-bar'), null, 'the bar is gone')
+    assert.equal(dotIn(rowEl(rows.a1)), null, 'the dot is gone')
+    assert.equal(rowEl(rows.a1).getAttribute('data-dsh-ux-zone'), null)
+    assert.equal(rowEl(rows.a1).getAttribute('data-dsh-ux-zone-edge'), null)
+    assert.equal(rowEl(rows.a1).style.height, undefined)
+    assert.equal(rowEl(rows.a1).style.boxSizing, undefined)
+    assert.equal(rowEl(rows.a1).style.paddingBlock, undefined)
+    assert.equal(rowEl(rows.d1).style.opacity, undefined)
+    assert.equal(rows.d1.style.display, undefined, 'the dormant rows come back into flow')
+    assert.equal(rows.d1.style.order, undefined)
+    assert.equal(section.style.order, undefined)
+    assert.equal(host.style.display, undefined, 'the host dot shows again')
+    assert.equal(host.getAttribute('data-state'), 'warning')
+    assert.equal(status.subscribeCount(), 0, 'the status subscription is released')
+    assert.equal((env.listeners.pointerover || []).length, 0)
+    assert.equal((env.listeners.pointerout || []).length, 0)
   } finally {
     tearDown()
   }
 })
 
-test('degraded mode (no uiSession): no fold row, no badge, no micro row', async () => {
+test('degraded mode: no uiSession means pure recency and no zone layer at all', async () => {
   const now = Date.now()
-  const { sections, section, rows, tearDown } = await mount({
-    sections: [
-      {
-        title: 'w1',
-        // The host renders this workspace's rows newest-first: c1, then the
-        // dormant run, then the 25h-running session.
-        rows: [
-          { id: 'c1', text: 'C one6分钟' },
-          { id: 'd1', text: 'D one6分钟' },
-          { id: 'd2', text: 'D two6分钟' },
-          { id: 'd3', text: 'D three6分钟' },
-          { id: 'd4', text: 'D four6分钟' },
-          { id: 'r1', text: 'R one6分钟' },
-        ],
-        actions: true,
-      },
-      { title: 'w2', rows: [{ id: 'q1', text: 'Q one6分钟' }] },
-    ],
-    sessions: [
-      session('c1', 'C one', now - 30 * 60 * 1000),
-      // A running session the status service is missing entirely.
-      session('r1', 'R one', now - 25 * HOUR_MS, { running: true }),
-      session('d1', 'D one', now - 4 * HOUR_MS),
-      session('d2', 'D two', now - 5 * HOUR_MS),
-      session('d3', 'D three', now - 6 * HOUR_MS),
-      session('d4', 'D four', now - 7 * HOUR_MS),
-      session('q1', 'Q one', now - 8 * HOUR_MS),
-    ],
-    workspaces: [
-      { workspaceId: 'w1', path: '/w1', title: 'w1', sessionIds: ['c1', 'r1', 'd1', 'd2', 'd3', 'd4'] },
-      { workspaceId: 'w2', path: '/w2', title: 'w2', sessionIds: ['q1'] },
-    ],
+  const sessions = [
+    session('b1', 'Beta one', now - 30 * HOUR_MS),
+    session('b2', 'Beta two', now - 2 * HOUR_MS),
+    session('b3', 'Beta three', now - 20 * HOUR_MS),
+  ]
+  const workspaces = [{
+    workspaceId: 'w1', path: '/w1', title: 'w1', sessionIds: ['b1', 'b2', 'b3'],
+  }]
+  const { rows, section, tearDown } = await mount({
+    sections: [{
+      title: 'w1',
+      rows: [rowSpec('b2', 'Beta two'), rowSpec('b3', 'Beta three'), rowSpec('b1', 'Beta one')],
+    }],
+    sessions,
+    workspaces,
   })
   try {
-    assert.equal(rows.c1.style.order, '10', 'the row layer still ranks by recency')
-    assert.equal(rows.r1.style.order, '15', 'a running row is ranked by recency, not pinned')
-    assert.equal(rows.d4.style.order, '14')
-    for (const id of ['c1', 'r1', 'd1', 'd2', 'd3', 'd4']) {
-      const row = rows[id]
-      assert.equal(rowEl(row).style.paddingBlock, undefined, `${id} keeps its host padding`)
-      assert.equal(rowEl(row).style.fontSize, undefined)
-      assert.equal(rowEl(row).style.opacity, undefined)
-      assert.equal(row.style.display, undefined, `${id} is never folded away`)
-    }
-    assert.equal(markerChild(section, 'fold-row'), null, 'no fold row without a status snapshot')
-    assert.equal(markerChild(headerOf({ section }), 'attention-badge'), null,
-      'no badge without a status snapshot')
-    assert.equal(sections[1].section.style.order, '1', 'the group layer still works')
+    assert.equal(rows.b2.style.order, '10', 'the freshest leads')
+    assert.equal(rows.b3.style.order, '11')
+    assert.equal(rows.b1.style.order, '12', 'without a status source the old row is ranked, not zoned')
+    assert.equal(rows.b1.style.display, undefined, 'nothing folds in degraded mode')
+    assert.equal(markerChild(section, 'fold-bar'), null, 'no bar')
+    assert.equal(rowEl(rows.b1).getAttribute('data-dsh-ux-zone'), null, 'no band')
+    assert.equal(rowEl(rows.b1).style.opacity, undefined)
+    assert.equal(rowEl(rows.b1).style.height, undefined)
+    assert.equal(dotIn(rowEl(rows.b1)), null, 'no dots')
+    assert.equal(markerChild(headerOf({ section }), 'attention-badge'), null, 'no badge without a status snapshot')
   } finally {
     tearDown()
   }
 })
 
-test('with a viewport, moved rows FLIP from their old position', async () => {
+test('with a viewport, a row entering the Active zone FLIPs up into the block', async () => {
   const rafs = []
   const now = Date.now()
   const uiSession = makeUiSession({})
-  const { rows, env, tearDown } = await mount({
+  // The DOM is already in the host's own recency order, and nothing below
+  // changes that order: the row moves because a dormant session starts running
+  // — a ZONE move, not a host reorder, which is the move the band exists for.
+  const sessions = [
+    session('b2', 'Beta two', now - 60 * 60 * 1000),
+    session('b3', 'Beta three', now - 3 * HOUR_MS),
+    session('b1', 'Beta one', now - 25 * HOUR_MS),
+  ]
+  const { rows, section, env, dispose, tearDown } = await mount({
     sections: [{
       title: 'w1',
-      rows: [
-        { id: 'b2', text: 'Beta two6分钟' },
-        { id: 'b3', text: 'Beta three6分钟' },
-        { id: 'b1', text: 'Beta one6分钟' },
-      ],
+      rows: [rowSpec('b2', 'Beta two'), rowSpec('b3', 'Beta three'), rowSpec('b1', 'Beta one')],
     }],
-    sessions: [
-      session('b1', 'Beta one', now - 3 * HOUR_MS),
-      session('b2', 'Beta two', now - 60 * 60 * 1000),
-      session('b3', 'Beta three', now - 2 * HOUR_MS),
-    ],
-    workspaces: [{ workspaceId: 'w1', path: '/w1', title: 'w1', sessionIds: ['b1', 'b2', 'b3'] }],
+    sessions,
+    workspaces: [{ workspaceId: 'w1', path: '/w1', title: 'w1', sessionIds: ['b2', 'b3', 'b1'] }],
     uiSession,
     prepare: (fake) => {
       fake.window.requestAnimationFrame = (fn) => { rafs.push(fn); return rafs.length }
@@ -1892,27 +2046,96 @@ test('with a viewport, moved rows FLIP from their old position', async () => {
   }
   try {
     assert.equal(rows.b2.style.order, '10', 'the freshest row leads before anything changes')
-    uiSession.setStatuses({ b3: PENDING_STATUS })
+    assert.equal(rows.b3.style.order, '11')
+    assert.equal(markerChild(section, 'fold-bar').style.order, '12', 'the bar holds the rank between the blocks')
+    assert.equal(rows.b1.style.order, '13', 'the dormant row waits behind it')
+    // Reveal the dormant block first: a display:none row has no position to
+    // animate from, and this test is about a move between two visible lanes.
+    markerChild(section, 'fold-bar').children[0].click()
     env.flushTimers()
-    assert.equal(rows.b3.style.order, '10', 'the pending row takes the lead')
-    assert.equal(rowEl(rows.b3).style.transform, 'translateY(40px)', 'it starts where it was, then animates')
-    assert.equal(rowEl(rows.b3).style.transition, 'none')
-    assert.equal(rowEl(rows.b2).style.transform, 'translateY(-40px)', 'the row it passes does the same')
-    assert.equal(rafs.length, 2, 'one release frame per moved row (the idle row is skipped)')
-    while (rafs.length > 0) rafs.shift()()
-    assert.equal(rowEl(rows.b3).style.transform, '', 'and is released to its real position')
-    assert.equal(rowEl(rows.b3).style.transition, 'transform 180ms ease')
-    assert.equal(rowEl(rows.b2).style.transform, '')
-    assert.equal(rowEl(rows.b1).style.transform, undefined, 'a row that did not move is untouched')
-    // The next pass must not stack animations: lingering transforms are
-    // cleared before the new snapshot is measured.
-    uiSession.setStatuses({})
+    assert.equal(rows.b1.style.display, undefined, 'the dormant row is on screen again')
+    rafs.length = 0
+    // Starting to run is Active whatever the last activity was (spec §1), so the
+    // row climbs one lane into the block without the host re-rendering.
+    uiSession.setStatuses({ b1: RUNNING_STATUS })
     env.flushTimers()
-    assert.equal(rows.b2.style.order, '10', 'the lead moves back with the statuses gone')
-    assert.equal(rows.b1.style.order, '12')
-    assert.equal(rafs.length, 2, 'the reverse move is animated too')
+    assert.equal(rows.b1.style.order, '12', 'the running row joins the Active block')
+    assert.equal(rowEl(rows.b1).style.transform, 'translateY(40px)', 'it starts where it was, then animates')
+    assert.equal(rowEl(rows.b1).style.transition, 'none')
+    assert.equal(rafs.length, 1, 'only the row that moved gets a release frame')
     while (rafs.length > 0) rafs.shift()()
-    assert.equal(rowEl(rows.b2).style.transform, '')
+    assert.equal(rowEl(rows.b1).style.transform, '', 'and is released to its real position')
+    assert.equal(rowEl(rows.b1).style.transition, 'transform 180ms ease')
+    assert.equal(rowEl(rows.b2).style.transform, undefined, 'a row that did not move is untouched')
+    // The release frame's inline `transition` is the one FLIP write that lives
+    // outside the style cache (animateFlip writes element.style directly), so
+    // it is the one a pass cannot take back. A following pass that animates
+    // nothing empties `flips`, and dispose must still hand the row back exactly
+    // as the host left it — no orphaned transition, no orphaned transform.
+    env.flushTimers()
+    dispose()
+    assert.equal(rowEl(rows.b1).style.transition, '', 'the release frame leaves no inline transition')
+    assert.equal(rowEl(rows.b1).style.transform, '', 'and no inline transform')
+    assert.equal(rowEl(rows.b1).getAttribute('style'), null, 'the host row is handed back untouched')
+  } finally {
+    tearDown()
+  }
+})
+
+test('a pass that beats the release frame takes the FLIP over: no orphaned transition', async () => {
+  // Measured in Chromium: `setTimeout(0)` is immediate but the next frame is up
+  // to ~16ms away, so a timer-driven pass routinely runs between the start of a
+  // FLIP and its release frame. That pass snaps the row to its resting place
+  // and drops it from `flips`; the release frame must then NOT write its inline
+  // `transition`, or the property is left with no owner — invisible to later
+  // passes (which walk `flips`) and to dispose (which walks `flips` too).
+  const rafs = []
+  const now = Date.now()
+  const uiSession = makeUiSession({})
+  const sessions = [
+    session('b2', 'Beta two', now - 60 * 60 * 1000),
+    session('b3', 'Beta three', now - 3 * HOUR_MS),
+    session('b1', 'Beta one', now - 25 * HOUR_MS),
+  ]
+  const { rows, section, env, dispose, tearDown } = await mount({
+    sections: [{
+      title: 'w1',
+      rows: [rowSpec('b2', 'Beta two'), rowSpec('b3', 'Beta three'), rowSpec('b1', 'Beta one')],
+    }],
+    sessions,
+    workspaces: [{ workspaceId: 'w1', path: '/w1', title: 'w1', sessionIds: ['b2', 'b3', 'b1'] }],
+    uiSession,
+    prepare: (fake) => {
+      fake.window.requestAnimationFrame = (fn) => { rafs.push(fn); return rafs.length }
+      fake.window.matchMedia = () => ({ matches: false })
+    },
+  })
+  for (const id of ['b1', 'b2', 'b3']) {
+    const wrap = rows[id]
+    rowEl(wrap).getBoundingClientRect = () => ({
+      left: 0, top: (Number(wrap.style.order) - 10) * 40, right: 0, bottom: 0, width: 0, height: 0,
+    })
+  }
+  try {
+    markerChild(section, 'fold-bar').children[0].click()
+    env.flushTimers()
+    assert.equal(rows.b1.style.display, undefined, 'the dormant row is on screen')
+    rafs.length = 0
+    uiSession.setStatuses({ b1: RUNNING_STATUS })
+    env.flushTimers()
+    assert.equal(rowEl(rows.b1).style.transition, 'none', 'the animation has started')
+    assert.equal(rafs.length, 1, 'and its release frame is still pending')
+    // The pass that beats the frame: another store notification re-runs the
+    // pass, nothing is left to move, so the row is handed straight back to its
+    // resting state and leaves `flips`.
+    uiSession.setStatuses({ b1: RUNNING_STATUS, b2: UNREAD_STATUS })
+    env.flushTimers()
+    assert.equal(rowEl(rows.b1).style.transform, '', 'the row rests where the pass put it')
+    assert.equal(rafs.length, 1, 'the release frame is still pending, now unowned')
+    while (rafs.length > 0) rafs.shift()()
+    assert.equal(rowEl(rows.b1).style.transition, '', 'the unowned release frame writes nothing')
+    dispose()
+    assert.equal(rowEl(rows.b1).getAttribute('style'), null, 'the host row is handed back untouched')
   } finally {
     tearDown()
   }
@@ -1921,34 +2144,33 @@ test('with a viewport, moved rows FLIP from their old position', async () => {
 test('a pass is deferred while the pointer is inside the tree', async () => {
   const now = Date.now()
   const uiSession = makeUiSession({})
-  const { rows, env, tearDown } = await mount({
+  const sessions = [
+    session('b2', 'Beta two', now - 60 * 60 * 1000),
+    session('b3', 'Beta three', now - 3 * HOUR_MS),
+    session('b1', 'Beta one', now - 25 * HOUR_MS),
+  ]
+  const { rows, section, env, tearDown } = await mount({
     sections: [{
       title: 'w1',
-      rows: [
-        { id: 'b2', text: 'Beta two6分钟' },
-        { id: 'b3', text: 'Beta three6分钟' },
-        { id: 'b1', text: 'Beta one6分钟' },
-      ],
+      rows: [rowSpec('b2', 'Beta two'), rowSpec('b3', 'Beta three'), rowSpec('b1', 'Beta one')],
     }],
-    sessions: [
-      session('b2', 'Beta two', now - 60 * 60 * 1000),
-      session('b3', 'Beta three', now - 2 * HOUR_MS),
-      session('b1', 'Beta one', now - 3 * HOUR_MS),
-    ],
-    workspaces: [{ workspaceId: 'w1', path: '/w1', title: 'w1', sessionIds: ['b1', 'b2', 'b3'] }],
+    sessions,
+    workspaces: [{ workspaceId: 'w1', path: '/w1', title: 'w1', sessionIds: ['b2', 'b3', 'b1'] }],
     uiSession,
   })
   try {
     assert.equal(rows.b2.style.order, '10', 'the freshest row leads')
     assert.equal(rows.b3.style.order, '11')
-    // The pointer enters the tree: moving rows under the cursor is exactly
-    // what the anti-churn freeze exists for. The pass is deferred, not lost.
+    assert.equal(rows.b1.style.order, '13', 'the dormant row waits behind the bar')
+    // The pointer enters the tree: moving rows under the cursor is exactly what
+    // the anti-churn freeze exists for. The pass is deferred, not lost.
     env.listeners.pointerover[0]({
       target: { closest: (sel) => (sel === '[role="tree"]' ? 'tree' : null) },
     })
-    uiSession.setStatuses({ b3: PENDING_STATUS })
+    uiSession.setStatuses({ b1: RUNNING_STATUS })
     env.flushTimers()
-    assert.equal(rows.b3.style.order, '11', 'a frozen pass writes nothing')
+    assert.equal(rows.b1.style.order, '13', 'a frozen pass writes nothing')
+    assert.equal(rows.b1.style.display, 'none', 'and the zone move waits with it')
     assert.equal(rows.b2.style.order, '10')
     // Leaving the tree releases the deferred pass on the next schedule.
     env.listeners.pointerout[0]({
@@ -1956,81 +2178,304 @@ test('a pass is deferred while the pointer is inside the tree', async () => {
       relatedTarget: { closest: () => null },
     })
     env.flushTimers()
-    assert.equal(rows.b3.style.order, '10', 'the deferred pass then runs')
-    assert.equal(rows.b2.style.order, '11')
+    assert.equal(rows.b1.style.order, '12', 'the deferred pass then runs')
+    assert.equal(rows.b1.style.display, undefined, 'the row joins the Active block')
+    assert.equal(markerChild(section, 'fold-bar'), null, 'and the bar retires: nothing is left to fold')
   } finally {
     tearDown()
   }
 })
 
-test('surplus dormant rows fold into one summary row that reveals them again', async () => {
+test('the bar folds the whole dormant block and reveals it again with its dots intact', async () => {
   const now = Date.now()
-  const uiSession = makeUiSession({})
-  const titles = {
-    c1: 'C one', d1: 'D one', d2: 'D two', d3: 'D three', d4: 'D four', d5: 'D five',
+  const sessions = [
+    session('a1', 'Active one', now - 30 * 60 * 1000),
+    session('a2', 'Active two', now - 2 * HOUR_MS),
+    session('d1', 'Dormant one', now - 25 * HOUR_MS),
+    session('d2', 'Dormant two', now - 30 * HOUR_MS),
+    session('d3', 'Dormant three', now - 40 * HOUR_MS),
+  ]
+  const workspaces = [{
+    workspaceId: 'w1', path: '/w1', title: 'w1', sessionIds: sessions.map((s) => s.id),
+  }]
+  const { rows, section, env, tearDown } = await mount({
+    sections: [{ title: 'w1', rows: sessions.map((s) => rowSpec(s.id, s.displayTitle)) }],
+    sessions,
+    workspaces,
+    uiSession: makeUiSession({ d2: PENDING_STATUS, d3: UNREAD_STATUS }),
+  })
+  try {
+    const bar = markerChild(section, 'fold-bar')
+    assert.ok(bar !== null, 'the dormant block is folded away')
+    assert.equal(bar.children[0].children[1].textContent, '3 条历史会话', 'the whole zone, no quota')
+    assert.equal(rows.d1.style.display, 'none')
+    assert.equal(rows.d2.style.display, 'none')
+    assert.equal(rows.d3.style.display, 'none')
+    assert.equal(rowEl(rows.d2).style.opacity, '0.5', 'hidden, but already faded for its return')
+    bar.children[0].click()
+    env.flushTimers()
+    assert.equal(rows.d1.style.display, undefined, 'the revealed block is back in flow')
+    assert.equal(rows.d2.style.display, undefined)
+    assert.equal(rows.d3.style.display, undefined)
+    assert.equal(rowEl(rows.d2).style.opacity, '0.5', 'and stays visually secondary')
+    assert.equal(rowEl(rows.d2).getAttribute('data-dsh-ux-zone'), null, 'revealed is not Active')
+    assert.equal(dotIn(rowEl(rows.d2)).dataset.dshUxKind, 'waiting', 'a revealed row keeps its own dot')
+    assert.equal(dotIn(rowEl(rows.d3)).dataset.dshUxKind, 'unread')
+    assert.equal(rows.d1.style.order, '13', 'the revealed rows stay below the Active block')
+    assert.equal(rows.d2.style.order, '14')
+    // Issue 4: the bar does NOT retire on reveal — it stays as the collapse
+    // control, so one control owns one state and nothing is stranded open.
+    const bar2 = markerChild(section, 'fold-bar')
+    assert.ok(bar2 !== null, 'the bar stays to fold the block back')
+    assert.equal(bar2.children[0].children[1].textContent, '收起历史会话')
+    assert.equal(bar2.children[0].getAttribute('aria-expanded'), 'true')
+    assert.equal(bar2.style.order, '12', 'the collapse control sits between the blocks')
+    bar2.children[0].click()
+    env.flushTimers()
+    assert.equal(rows.d1.style.display, 'none', 'a second click folds the block back')
+    assert.equal(rows.d3.style.display, 'none')
+    assert.equal(markerChild(section, 'fold-bar').children[0].children[1].textContent, '3 条历史会话')
+  } finally {
+    tearDown()
   }
-  const domOrder = ['c1', 'd1', 'd2', 'd3', 'd4', 'd5']
+})
+
+test('the bar absorbs the host overflow count and hides its button', async () => {
+  const now = Date.now()
+  const sessions = [
+    session('a1', 'Active one', now - 30 * 60 * 1000),
+    session('d1', 'Dormant one', now - 25 * HOUR_MS),
+    session('d2', 'Dormant two', now - 26 * HOUR_MS),
+  ]
+  const workspaces = [{
+    workspaceId: 'w1', path: '/w1', title: 'w1', sessionIds: sessions.map((s) => s.id),
+  }]
+  const status = makeUiSession({})
   const { rows, section, button, env, tearDown } = await mount({
     sections: [{
       title: 'w1',
-      rows: domOrder.map((id) => rowSpec(id, titles[id])),
-      button: 'expanded',
+      rows: sessions.map((s) => rowSpec(s.id, s.displayTitle)),
+      button: 'collapsed',
     }],
-    sessions: [
-      session('c1', titles.c1, now - 30 * 60 * 1000),
-      session('d1', titles.d1, now - 4 * HOUR_MS),
-      session('d2', titles.d2, now - 5 * HOUR_MS),
-      session('d3', titles.d3, now - 6 * HOUR_MS),
-      session('d4', titles.d4, now - 7 * HOUR_MS),
-      session('d5', titles.d5, now - 8 * HOUR_MS),
-    ],
-    workspaces: [{ workspaceId: 'w1', path: '/w1', title: 'w1', sessionIds: domOrder }],
-    uiSession,
+    sessions,
+    workspaces,
+    uiSession: status,
   })
   try {
-    assert.equal(rows.c1.style.order, '10')
-    assert.equal(rows.d1.style.order, '11', 'the first three dormant rows stay')
-    assert.equal(rows.d3.style.order, '13')
-    assert.equal(rows.d4.style.order, '14', 'a folded row is still ranked')
-    assert.equal(rows.d4.style.display, 'none', 'the fourth dormant row folds')
-    assert.equal(rows.d5.style.display, 'none')
-    assert.equal(rows.d1.style.display, undefined, 'a kept dormant row is not hidden')
-    const foldRow = markerChild(section, 'fold-row')
-    assert.ok(foldRow !== null, 'the section gains one synthetic fold row')
-    assert.equal(section.children[section.children.length - 1], foldRow,
-      'it is the section last flex item')
-    assert.equal(foldRow.style.order, '998', 'just before the host overflow button slot')
-    assert.equal(button.style.order, '999', 'the host overflow button is still last')
-    assert.equal(foldRow.children[0].textContent, '2 条更早会话 · 最近一次 7小时')
-    // A section whose DOM gained the fold row still pairs and reorders: the
-    // injected child is skipped by rowChildren, so the count gate keeps
-    // matching (a fold row counted as a row would trace a bail-out here).
-    env.window.localStorage.setItem('dsh.ux-plus.recency.debug', '1')
-    const debug = []
-    const previousDebug = console.debug
-    console.debug = (...args) => { debug.push(args.join(' ')) }
-    try {
-      uiSession.setStatuses({ d3: PENDING_STATUS })
-      env.flushTimers()
-    } finally {
-      console.debug = previousDebug
-    }
-    assert.deepEqual(debug, [], 'no count or pairing bail-out is traced')
-    assert.equal(rows.d3.style.order, '10', 'the section re-ranked with the fold row in the DOM')
-    assert.equal(rows.d4.style.display, undefined, 'a row that is no longer surplus is restored')
-    assert.equal(rows.d5.style.display, 'none', 'only the surplus stays folded')
-    assert.equal(markerChild(section, 'fold-row').children[0].textContent,
-      '1 条更早会话 · 最近一次 8小时')
-    // Clicking reveals the hidden rows for the rest of the page load.
-    const sameRow = markerChild(section, 'fold-row')
-    assert.equal(sameRow, foldRow, 'the fold row element is reused across passes')
-    sameRow.children[0].click()
+    // The host's own truncation row ('展开其余 3 个会话'): collapsed, with a count.
+    button.textContent = '展开其余 3 个会话'
+    button.addEventListener('click', () => { button.clicks = (button.clicks || 0) + 1 })
+    status.setStatuses({})
     env.flushTimers()
-    assert.equal(rows.d4.style.display, undefined, 'revealing restores the hidden row')
-    assert.equal(rows.d5.style.display, undefined)
-    assert.equal(markerChild(section, 'fold-row'), null, 'nothing is hidden, so no fold row remains')
-    assert.equal(rows.d4.style.order, '14', 'the revealed rows keep their rank')
-    assert.equal(button.style.order, '999')
+    const bar = markerChild(section, 'fold-bar')
+    assert.ok(bar !== null, 'the bar owns the section one truncation row')
+    assert.equal(bar.children[0].children[1].textContent, '5 条历史会话',
+      'the two dormant rows plus the three the host hides')
+    assert.equal(button.style.display, 'none', 'the host button steps aside while the bar shows')
+    bar.children[0].click()
+    env.flushTimers()
+    assert.equal(button.clicks, 1, 'the bar proxies the host expand')
+    // Issue 4: the reveal FOLLOWS the host's own aria-expanded — the stub host
+    // has not expanded yet, so the click alone reveals nothing and no row can
+    // be stranded open while the host thinks it is collapsed.
+    assert.equal(rows.d1.style.display, 'none', 'the host state is the reveal truth')
+    assert.equal(button.style.display, 'none', 'the host button stays absorbed while collapsed')
+    button.setAttribute('aria-expanded', 'true')
+    status.setStatuses({})
+    env.flushTimers()
+    assert.equal(rows.d1.style.display, undefined, 'the host expansion reveals this block too')
+    assert.equal(rows.d2.style.display, undefined)
+    assert.equal(markerChild(section, 'fold-bar'), null, 'everything is visible: the bar retires')
+    assert.equal(button.style.display, undefined, 'and the host control comes back')
+  } finally {
+    tearDown()
+  }
+})
+
+test('the periodic tick re-zones a row whose 24 hours ran out', async () => {
+  const intervals = []
+  const now = Date.now()
+  const sessions = [
+    session('a1', 'Active one', now - 23 * HOUR_MS - 50 * 60 * 1000),
+    session('d1', 'Dormant one', now - 25 * HOUR_MS),
+  ]
+  const workspaces = [{
+    workspaceId: 'w1', path: '/w1', title: 'w1', sessionIds: sessions.map((s) => s.id),
+  }]
+  const { rows, section, env, tearDown } = await mount({
+    sections: [{ title: 'w1', rows: sessions.map((s) => rowSpec(s.id, s.displayTitle)) }],
+    sessions,
+    workspaces,
+    uiSession: makeUiSession({}),
+    prepare: (fake) => {
+      fake.window.setInterval = (fn, ms) => { intervals.push({ fn, ms }); return intervals.length }
+      fake.window.clearInterval = () => {}
+    },
+  })
+  try {
+    assert.equal(intervals.length, 1, 'one shared tick drives the labels and the zone recompute')
+    assert.equal(intervals[0].ms, 60000, 'the faster of the two needs (60s labels, 5min zones)')
+    assert.equal(rowEl(rows.a1).getAttribute('data-dsh-ux-zone'), 'active')
+    assert.equal(markerChild(section, 'fold-bar').children[0].children[1].textContent, '1 条历史会话')
+    // Ten minutes later: nothing in the data layer changed, only the clock. The
+    // tick is the only thing that can move the row across the zone boundary.
+    sessions[0].updatedAt = now - DAY_MS - 10 * 60 * 1000
+    intervals[0].fn()
+    env.flushTimers()
+    assert.equal(rowEl(rows.a1).getAttribute('data-dsh-ux-zone'), null, 'the row left the Active zone')
+    assert.equal(rows.a1.style.display, 'none', 'and folded into the dormant block')
+    assert.equal(rowEl(rows.a1).style.opacity, '0.5')
+    assert.equal(markerChild(section, 'fold-bar').children[0].children[1].textContent, '2 条历史会话')
+  } finally {
+    tearDown()
+  }
+})
+
+test('an all-dormant section with host truncation folds everything behind one bar', async () => {
+  // The host renders 5 of 19 rows (its own quota) and the replay mirrors that
+  // slice, so the bar speaks for BOTH truncations — and one click round-trip
+  // (issue 4) opens and closes everything together, following the host state.
+  const now = Date.now()
+  const sessions = []
+  for (let i = 0; i < 19; i += 1) {
+    sessions.push(session(`s${String(i).padStart(2, '0')}`, `Old ${i}`, now - (30 + i) * HOUR_MS))
+  }
+  const workspaces = [{
+    workspaceId: 'w1', path: '/w1', title: 'w1', sessionIds: sessions.map((s) => s.id),
+  }]
+  const status = makeUiSession({})
+  const shown = sessions.slice(0, 5)
+  const { rows, section, button, env, tearDown } = await mount({
+    sections: [{
+      title: 'w1',
+      rows: shown.map((s) => rowSpec(s.id, s.displayTitle)),
+      button: 'collapsed',
+    }],
+    sessions,
+    workspaces,
+    uiSession: status,
+  })
+  try {
+    button.textContent = '展开其余 14 个会话'
+    status.setStatuses({})
+    env.flushTimers()
+    const bar = markerChild(section, 'fold-bar')
+    assert.ok(bar !== null, 'the bar owns the section even when every row is dormant')
+    assert.equal(bar.children[0].children[1].textContent, '19 条历史会话',
+      'the five rows this feature hides plus the fourteen the host hides')
+    assert.equal(button.style.display, 'none', 'the host button steps aside')
+    assert.equal(rows.s00.style.display, 'none', 'a dormant rendered row is folded too')
+    button.setAttribute('aria-expanded', 'true')
+    status.setStatuses({})
+    env.flushTimers()
+    assert.equal(markerChild(section, 'fold-bar'), null, 'the host expansion reveals everything')
+    assert.equal(rows.s00.style.display, undefined)
+    assert.equal(button.style.display, undefined, 'and the host control comes back as 收起')
+  } finally {
+    tearDown()
+  }
+})
+
+// ---------------------------------------------------------------------------
+// Compact rows (user rule): the sidebar was asked for a Claude-like density —
+// an inline 26px box and 13px/18px titles instead of the host's CSS-pinned
+// 32px box and 14px/20px titles.
+// ---------------------------------------------------------------------------
+
+/** One row's host text leaves (same shape as the host renders them). */
+function cellsOf(row) {
+  const found = {}
+  for (const child of row.children) found[child.className] = child
+  return found
+}
+
+test('every session row wears the compact box and the compact title/age metrics', async () => {
+  const now = Date.now()
+  const sessions = [
+    session('a1', 'Active one', now - 30 * 60 * 1000),
+    session('d1', 'Dormant one', now - 25 * HOUR_MS),
+  ]
+  const workspaces = [{
+    workspaceId: 'w1', path: '/w1', title: 'w1', sessionIds: sessions.map((s) => s.id),
+  }]
+  const status = makeUiSession({})
+  const { rows, dispose, tearDown } = await mount({
+    sections: [{
+      title: 'w1',
+      rows: [
+        hostDomRow('a1', 'Active one', '6分钟', 'Running'),
+        hostDomRow('d1', 'Dormant one', '25小时', 'Completed'),
+      ],
+    }],
+    sessions,
+    workspaces,
+    uiSession: status,
+  })
+  try {
+    for (const [id, row] of [['a1', rows.a1], ['d1', rows.d1]]) {
+      // ONE box for the whole list: Active and dormant rows share it, so the
+      // Active block is set apart by its band and dots, not by row height.
+      assert.equal(rowEl(row).style.height, '26px', `${id}: the compact box replaces the host's 32px`)
+      // The host has no global border-box reset and .sessionRow is the one row
+      // kind that does not opt in (the project and search rows do), so the box
+      // must declare border-box or 26px + 1px padding paints as a 28px row.
+      assert.equal(rowEl(row).style.boxSizing, 'border-box')
+      assert.equal(rowEl(row).style.paddingBlock, '1px')
+      assert.equal(rowEl(row).style.paddingInlineEnd, '6px')
+      // The host's depth indent (padding-inline-start) is never overwritten.
+      assert.equal(rowEl(row).style.paddingInline, undefined)
+      assert.equal(rowEl(row).style.gap, '4px')
+      const cells = cellsOf(rowEl(row))
+      assert.equal(cells.title.style.fontSize, '13px', `${id}: the title drops one step`)
+      assert.equal(cells.title.style.lineHeight, '18px')
+      // The compact row's own gap owns the title spacing: the host's 6px/4px
+      // lateral margins (Rows.module.css:115-117) are zeroed, not inherited.
+      assert.equal(cells.title.style.marginLeft, '0px')
+      assert.equal(cells.title.style.marginRight, '0px')
+      assert.equal(cells.time.style.fontSize, '10px', `${id}: the age keeps its step`)
+      assert.equal(cells.time.style.lineHeight, '14px')
+      // The status leaf is not a styled cell: only the row's text steps down.
+      assert.equal(cells.visuallyHidden.style.fontSize, undefined)
+    }
+    // The dormant row differs by its fade alone, never by its box.
+    assert.equal(rowEl(rows.d1).style.opacity, '0.5')
+    assert.equal(rowEl(rows.a1).style.opacity, undefined)
+    // Switching the feature off gives the host's own metrics back exactly —
+    // no compact value survives a dispose. (dispose() directly, so the
+    // finally block still owns the global teardown.)
+    dispose()
+    assert.equal(rowEl(rows.a1).style.height, undefined)
+    assert.equal(rowEl(rows.a1).style.boxSizing, undefined)
+    assert.equal(rowEl(rows.a1).style.paddingInlineEnd, undefined)
+    assert.equal(cellsOf(rowEl(rows.a1)).title.style.fontSize, undefined)
+    assert.equal(cellsOf(rowEl(rows.a1)).title.style.marginLeft, undefined)
+    assert.equal(cellsOf(rowEl(rows.a1)).time.style.lineHeight, undefined)
+  } finally {
+    tearDown()
+  }
+})
+
+test('an archived row keeps the host metrics: no compact box, no compact title', async () => {
+  const now = Date.now()
+  const sessions = [session('r1', 'Archived one', now - 30 * 60 * 1000)]
+  const workspaces = [{
+    workspaceId: 'w1', path: '/w1', title: 'w1', sessionIds: ['r1'],
+  }]
+  const status = makeUiSession({})
+  const { rows, tearDown } = await mount({
+    sections: [{ title: 'w1', rows: [hostDomRow('r1', 'Archived one', '6分钟', 'Completed')] }],
+    sessions,
+    workspaces,
+    archived: ['r1'],
+    uiSession: status,
+  })
+  try {
+    assert.equal(rowEl(rows.r1).style.height, undefined, 'the host box is left alone')
+    assert.equal(rowEl(rows.r1).style.boxSizing, undefined, 'the host box model is left alone')
+    assert.equal(rowEl(rows.r1).style.paddingInlineEnd, undefined)
+    assert.equal(cellsOf(rowEl(rows.r1)).title.style.fontSize, undefined)
+    assert.equal(cellsOf(rowEl(rows.r1)).title.style.marginLeft, undefined)
+    assert.equal(rowEl(rows.r1).getAttribute('data-dsh-ux-zone'), null)
   } finally {
     tearDown()
   }
