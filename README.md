@@ -115,8 +115,8 @@ npm run build   # tsdown emits lib/client.js (classic script, committed to the r
 
 The three most recent entries; full history in [CHANGELOG.md](CHANGELOG.md).
 
+- **v0.4.5 · 2026-10-18** — Icon is now a die-cut sticker: no background tile, just the whale and the UX+ mark with a white edge tracing the combined silhouette (the mark keeps its own halo). No behaviour change.
 - **v0.4.4 · 2026-10-18** — Icon polish: the white edge now frames the whole tile instead of outlining the UX+ letters; the inline README icon grows to 44px. No behaviour change.
-- **v0.4.3 · 2026-10-18** — The project icon: the host's whale with an italic UX+ mark, inline before the README title and shipped as `docs/images/icon.svg` / `icon-512.png`. No behaviour change.
 
 ## License
 
