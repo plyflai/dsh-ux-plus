@@ -105,6 +105,7 @@ function makeEnv() {
     windowListeners: {},
     moInstances: [],
     timers: [],
+    timerDelays: [],
   }
   env.document = {
     body: makeElement('body'),
@@ -125,7 +126,11 @@ function makeEnv() {
       setItem(k, v) { this.store.set(k, String(v)) },
       removeItem(k) { this.store.delete(k) },
     },
-    setTimeout: (fn) => { env.timers.push(fn); return env.timers.length - 1 },
+    setTimeout: (fn, ms) => {
+      env.timers.push(fn)
+      env.timerDelays.push(ms === undefined ? 0 : ms)
+      return env.timers.length - 1
+    },
     clearTimeout: (id) => { if (env.timers[id]) env.timers[id] = null },
   }
   env.MutationObserver = class {
@@ -1346,10 +1351,88 @@ test('a collapsed section exempts the running row, then ranks it to the top', as
   }
 })
 
-test('a parent with a running subagent is exempt from the idle quota too', async () => {
-  // Host runningChildCount (tree.ts:390-395) reads the subagentCatalog
-  // projection values, so a parent whose child is still running is rendered
-  // outside the quota even though the parent row itself is idle.
+test('a running row consumes the watermark: the band and the fold both survive (0.2.1 host)', async () => {
+  // The reported production shape, twice over: a workspace whose collapsed
+  // slice leads with a RUNNING row (dsh-ux-plus: 在吗 + 4 dormant; research:
+  // running + 4 active). The 0.2.1 host does not exempt running rows — they
+  // consume the watermark — and the old exempt-based replay counted these
+  // sections one row short, tripped the count gate and stepped aside: the
+  // green band vanished and the folded history leaked out below the button.
+  // Under the watermark replay the section is consistent: band on, fold on.
+  const now = Date.now()
+  const sessions = [
+    runningSession('run', 'Run one', now),
+    session('d1', 'Dormant one', now - 25 * HOUR_MS),
+    session('d2', 'Dormant two', now - 30 * HOUR_MS),
+    session('d3', 'Dormant three', now - 31 * HOUR_MS),
+    session('d4', 'Dormant four', now - 32 * HOUR_MS),
+    session('d5', 'Dormant five', now - 33 * HOUR_MS),
+  ]
+  const status = makeUiSession({ run: RUNNING_STATUS })
+  const { rows, section, button, env, tearDown } = await mount({
+    sections: [{
+      title: 'w1',
+      rows: [
+        rowSpec('run', 'Run one'), rowSpec('d1', 'Dormant one'), rowSpec('d2', 'Dormant two'),
+        rowSpec('d3', 'Dormant three'), rowSpec('d4', 'Dormant four'),
+      ],
+      button: 'collapsed',
+    }],
+    sessions,
+    workspaces: [{ workspaceId: 'w1', path: '/w1', title: 'w1', sessionIds: sessions.map((s) => s.id) }],
+    uiSession: status,
+  })
+  try {
+    button.textContent = '展开其余 1 个会话'
+    env.flushTimers()
+    assert.ok(markerChild(section, 'zone-band') !== null, 'the running row wears the Active band')
+    assert.equal(button.style.order, '11', 'the expand button is pinned below the block')
+    assert.equal(rows.d1.style.display, 'none', 'the dormant rows the watermark rendered stay folded')
+    assert.equal(rows.d4.style.display, 'none')
+    assert.equal(rows.run.style.order, '10', 'and the running row leads the block')
+  } finally {
+    tearDown()
+  }
+})
+
+test('a running row among all-active rows keeps the band over the whole block', async () => {
+  // The research shape: running + four rows touched within 24 hours — every
+  // rendered row is Active, so the band covers all five and the button pins
+  // below them with nothing folded.
+  const now = Date.now()
+  const sessions = [runningSession('run', 'Run one', now - 14 * 60 * 1000)]
+  for (let i = 1; i <= 4; i += 1) sessions.push(session(`a${i}`, `A ${i}`, now - i * 4 * HOUR_MS))
+  const extra = []
+  for (let i = 5; i <= 20; i += 1) extra.push(session(`a${i}`, `A ${i}`, now - (i + 2) * DAY_MS))
+  const all = [...sessions, ...extra]
+  const status = makeUiSession({ run: RUNNING_STATUS })
+  const { rows, section, button, env, tearDown } = await mount({
+    sections: [{
+      title: 'w1',
+      rows: sessions.map((s) => rowSpec(s.id, s.displayTitle)),
+      button: 'collapsed',
+    }],
+    sessions: all,
+    workspaces: [{ workspaceId: 'w1', path: '/w1', title: 'w1', sessionIds: all.map((s) => s.id) }],
+    uiSession: status,
+  })
+  try {
+    button.textContent = '展开其余 16 个会话'
+    env.flushTimers()
+    assert.ok(markerChild(section, 'zone-band') !== null, 'the band covers the all-active slice')
+    assert.equal(button.style.order, '15', 'the button pins below the five-row block')
+    assert.equal(rows.a4.style.display, undefined, 'nothing is folded — every row is Active')
+    assert.equal(rows.a4.style.order, '14')
+  } finally {
+    tearDown()
+  }
+})
+
+test('a running-subagent parent renders inside the watermark like any row', async () => {
+  // Watermark model (0.2.1-rc.1): running rows are NOT exempt — they consume
+  // the watermark; the host RAISES the watermark to cover attention rows
+  // (requiredWatermark), so the parent renders as part of a normal slice.
+  // The replay derives the watermark from the DOM, so it matches either way.
   const sessions = [
     session('p1', 'Parent one', 700),
     session('sub1', 'Sub one', 0, {
@@ -1395,10 +1478,10 @@ test('a parent with a running subagent is exempt from the idle quota too', async
   }
 })
 
-test('a section the user expanded (quota 10) keeps working', async () => {
-  // One 展开更多 click raises the group's quota to 10, so the host renders 11
-  // rows (1 running + 10 idle). The replay derives that quota from the DOM
-  // instead of assuming the collapsed default.
+test('a section the user expanded (watermark 10) keeps working', async () => {
+  // One 展开 click raises the group's watermark from 5 to 10 (running rows
+  // included), so the host renders 10 rows. The replay derives that watermark
+  // from the DOM instead of assuming the collapsed base.
   const sessions = [runningSession('run', 'Run one', 5000)]
   const text = { run: 'Run one1分钟' }
   const memberIds = ['run']
@@ -1408,7 +1491,7 @@ test('a section the user expanded (quota 10) keeps working', async () => {
     memberIds.push(`a${i}`)
   }
   const shown = ['run']
-  for (let i = 12; i >= 3; i -= 1) shown.push(`a${i}`)
+  for (let i = 12; i >= 4; i -= 1) shown.push(`a${i}`)
   const { rows, tearDown } = await mount({
     sections: [{
       title: 'w1',
@@ -1421,24 +1504,38 @@ test('a section the user expanded (quota 10) keeps working', async () => {
   try {
     assert.equal(rows.run.style.order, '10')
     assert.equal(rows.a12.style.order, '11')
-    assert.equal(rows.a3.style.order, '20')
+    assert.equal(rows.a4.style.order, '19')
   } finally {
     tearDown()
   }
 })
 
-test('a rendered count no host quota explains still fails closed', async () => {
-  // 1 running + 4 idle is not the host's 1 running + 5·n idle shape: the
-  // count is drift, not a quota, so the section's row layer must write no
-  // order at all instead of guessing a slice (presentation never guesses).
+test('a rendered count the store cannot explain still fails closed', async () => {
+  // The host rendered a row for a session the store has not published: the
+  // DOM holds more rows than the replay has ids for, so no watermark explains
+  // the count. The section's row layer must write no order at all instead of
+  // guessing a slice (presentation never guesses). Under the watermark model
+  // a SHORTER slice is never drift on its own — the watermark is derived from
+  // the DOM, and the host grows it one row at a time.
   const { rows, sections, tearDown } = await mount({
     sections: [{
       title: 'w1',
-      rows: runRows(['run', 'a6', 'a5', 'a4', 'a3']),
+      rows: [...runRows(['run', 'a6', 'a5', 'a4', 'a3']), { id: 'zz', text: 'Ghost 1分钟' }],
       button: 'collapsed',
     }],
-    sessions: RUN_SESSIONS,
-    workspaces: RUN_WORKSPACES,
+    sessions: [
+      runningSession('run', 'Run one', 900),
+      session('a3', 'A three', 300),
+      session('a4', 'A four', 400),
+      session('a5', 'A five', 500),
+      session('a6', 'A six', 600),
+    ],
+    workspaces: [{
+      workspaceId: 'w1',
+      path: '/w1',
+      title: 'w1',
+      sessionIds: ['run', 'a3', 'a4', 'a5', 'a6'],
+    }],
   })
   try {
     assert.equal(sections[0].section.style.order, '0', 'the group layer still applies')
@@ -1598,13 +1695,10 @@ test('statusOf: pendingInteraction outranks running outranks unread', async () =
   assert.equal(statusOf(null), 'none')
 })
 
-test('the zone copy: bar text, dot labels and the badge tooltip (zh/en)', async () => {
-  const { foldBarText, statusLabel, badgeKinds, badgeTooltip } = await import(
+test('the zone copy: dot labels and the badge tooltip (zh/en)', async () => {
+  const { statusLabel, badgeKinds, badgeTooltip } = await import(
     new URL('features/workspace-recency-order/src/index.js', root).href
   )
-  assert.equal(foldBarText('zh-CN', 7), '7 条历史会话')
-  assert.equal(foldBarText('en-US', 7), '7 earlier sessions')
-  assert.equal(foldBarText('en', 0), '0 earlier sessions', 'a zero count is still a count')
   assert.equal(statusLabel('zh-CN', 'waiting'), '待回复')
   assert.equal(statusLabel('zh-CN', 'running'), '运行中')
   assert.equal(statusLabel('zh-CN', 'unread'), '未读')
@@ -1626,7 +1720,7 @@ test('the zone copy: bar text, dot labels and the badge tooltip (zh/en)', async 
   assert.equal(badgeTooltip('zh-CN', undefined), '')
 })
 
-test('the Active block leads and wears one green band, the dormant block folds behind the bar', async () => {
+test('the Active block leads and wears one green band, the dormant block stays in flow', async () => {
   const now = Date.now()
   const sessions = [
     session('a1', 'Active one', now - 30 * 60 * 1000),
@@ -1651,19 +1745,16 @@ test('the Active block leads and wears one green band, the dormant block folds b
     assert.equal(rows.a1.style.order, '10')
     assert.equal(rows.a2.style.order, '11')
     assert.equal(rows.a3.style.order, '12')
-    // One rank slot is left between the blocks for the bar (spec §4).
-    const bar = markerChild(section, 'fold-bar')
-    assert.ok(bar !== null, 'the whole dormant block folds behind the bar')
-    assert.equal(bar.style.order, '13', 'the bar owns the rank between the blocks')
+    // One rank slot is left between the blocks for the host's overflow button
+    // (user rule) — unused here, where the host renders no such button.
+    assert.equal(markerChild(section, 'fold-bar'), null, 'this feature injects no fold row')
     assert.equal(rows.d1.style.order, '14')
     assert.equal(rows.d2.style.order, '15')
     assert.equal(rows.d3.style.order, '16')
-    assert.equal(bar.children[0].children[1].textContent, '3 条历史会话')
-    assert.equal(bar.children[0].getAttribute('aria-expanded'), 'false')
-    // Hidden, but still in the DOM: the replay count and the pairing stay valid.
-    assert.equal(rows.d1.style.display, 'none')
-    assert.equal(rows.d2.style.display, 'none')
-    assert.equal(rows.d3.style.display, 'none')
+    // Nothing is hidden: the host's quota is the only truncation.
+    assert.equal(rows.d1.style.display, undefined)
+    assert.equal(rows.d2.style.display, undefined)
+    assert.equal(rows.d3.style.display, undefined)
     assert.equal(rows.a1.style.display, undefined)
     // Density: ONE compact box for the whole list — the Active block is told
     // apart by its band, never by a taller row (user rule) — and the dormant
@@ -1931,13 +2022,14 @@ test('a workspace with a pending member outranks a fresher-activity workspace', 
     assert.equal(sections[1].section.style.marginTop, '0px')
     assert.equal(sections[0].section.style.marginTop, '4px')
     // The row layer is untouched by the group boost: each section still ranks
-    // its own rows. That pending member is 30 hours old, so it now waits in the
-    // dormant zone behind its bar — the bar takes rank 10 and the row follows it
-    // — while the group layer above still treats it as blocking attention.
-    assert.equal(markerChild(sections[1].section, 'fold-bar').style.order, '10',
-      'the dormant bar takes the rank between the blocks')
-    assert.equal(sections[1].rows.p1.style.order, '11', 'the row layer is untouched by the group boost')
-    assert.equal(sections[1].rows.p1.style.display, 'none', 'a dormant pending row is folded')
+    // its own rows. That pending member is 30 hours old, so its zone is
+    // dormant — and with no Active block at all, the section is handed to the
+    // host (user rule): no bar, no fold — while the group layer above still
+    // treats it as blocking attention.
+    assert.equal(markerChild(sections[1].section, 'fold-bar'), null,
+      'an all-dormant section yields to the host: no bar')
+    assert.equal(sections[1].rows.p1.style.order, '10', 'the row layer is untouched by the group boost')
+    assert.equal(sections[1].rows.p1.style.display, undefined, 'nothing folds in a yielded section')
     assert.equal(rows.f1.style.order, '10', 'each section still ranks its own rows')
   } finally {
     tearDown()
@@ -1963,10 +2055,10 @@ test('dispose takes back every dot, the bar and the zone marks and restores the 
     uiSession: status,
   })
   try {
-    assert.ok(markerChild(section, 'fold-bar') !== null, 'the zone layer is up')
+    assert.ok(markerChild(section, 'zone-band') !== null, 'the zone layer is up')
     assert.ok(dotIn(rowEl(rows.a1)) !== null)
     assert.equal(rowEl(rows.a1).getAttribute('data-dsh-ux-zone'), 'active')
-    assert.equal(rows.d1.style.display, 'none')
+    assert.equal(rows.d1.style.display, undefined, 'nothing is hidden — the host truncates, not this feature')
     const host = env.document.createElement('span')
     host.setAttribute('data-state', 'warning')
     rowEl(rows.a2).appendChild(host)
@@ -1974,7 +2066,7 @@ test('dispose takes back every dot, the bar and the zone marks and restores the 
     env.flushTimers()
     assert.equal(host.style.display, 'none', 'the host dot was hidden by a pass')
     dispose()
-    assert.equal(markerChild(section, 'fold-bar'), null, 'the bar is gone')
+    assert.equal(markerChild(section, 'zone-band'), null, 'the band is gone')
     assert.equal(dotIn(rowEl(rows.a1)), null, 'the dot is gone')
     assert.equal(rowEl(rows.a1).getAttribute('data-dsh-ux-zone'), null)
     assert.equal(rowEl(rows.a1).getAttribute('data-dsh-ux-zone-edge'), null)
@@ -2065,13 +2157,8 @@ test('with a viewport, a row entering the Active zone FLIPs up into the block', 
   try {
     assert.equal(rows.b2.style.order, '10', 'the freshest row leads before anything changes')
     assert.equal(rows.b3.style.order, '11')
-    assert.equal(markerChild(section, 'fold-bar').style.order, '12', 'the bar holds the rank between the blocks')
-    assert.equal(rows.b1.style.order, '13', 'the dormant row waits behind it')
-    // Reveal the dormant block first: a display:none row has no position to
-    // animate from, and this test is about a move between two visible lanes.
-    markerChild(section, 'fold-bar').children[0].click()
-    env.flushTimers()
-    assert.equal(rows.b1.style.display, undefined, 'the dormant row is on screen again')
+    assert.equal(rows.b1.style.order, '13', 'the dormant row waits below the button slot (rank 12, host renders no button here)')
+    assert.equal(rows.b1.style.display, undefined, 'the dormant row is on screen — nothing folds')
     rafs.length = 0
     // Starting to run is Active whatever the last activity was (spec §1), so the
     // row climbs one lane into the block without the host re-rendering.
@@ -2135,8 +2222,6 @@ test('a pass that beats the release frame takes the FLIP over: no orphaned trans
     })
   }
   try {
-    markerChild(section, 'fold-bar').children[0].click()
-    env.flushTimers()
     assert.equal(rows.b1.style.display, undefined, 'the dormant row is on screen')
     rafs.length = 0
     uiSession.setStatuses({ b1: RUNNING_STATUS })
@@ -2179,7 +2264,7 @@ test('a pass is deferred while the pointer is inside the tree', async () => {
   try {
     assert.equal(rows.b2.style.order, '10', 'the freshest row leads')
     assert.equal(rows.b3.style.order, '11')
-    assert.equal(rows.b1.style.order, '13', 'the dormant row waits behind the bar')
+    assert.equal(rows.b1.style.order, '13', 'the dormant row waits below the button slot')
     // The pointer enters the tree: moving rows under the cursor is exactly what
     // the anti-churn freeze exists for. The pass is deferred, not lost.
     env.listeners.pointerover[0]({
@@ -2188,7 +2273,7 @@ test('a pass is deferred while the pointer is inside the tree', async () => {
     uiSession.setStatuses({ b1: RUNNING_STATUS })
     env.flushTimers()
     assert.equal(rows.b1.style.order, '13', 'a frozen pass writes nothing')
-    assert.equal(rows.b1.style.display, 'none', 'and the zone move waits with it')
+    assert.equal(rowEl(rows.b1).getAttribute('data-dsh-ux-zone'), null, 'and the zone move waits with it')
     assert.equal(rows.b2.style.order, '10')
     // Leaving the tree releases the deferred pass on the next schedule.
     env.listeners.pointerout[0]({
@@ -2225,7 +2310,7 @@ test('a view-mode change pierces the freeze and restyles at once', async () => {
     },
   })
   try {
-    assert.equal(rows.b1.style.order, '13', 'the dormant row starts behind the bar')
+    assert.equal(rows.b1.style.order, '13', 'the dormant row starts below the button slot')
     // The pointer is inside the tree when the user picks a different 分组方式:
     // the host's menu closes right over the list, so the pointer sits on a row
     // at the exact moment the view changes. This is the reported shape — native
@@ -2282,7 +2367,7 @@ test('a deferred pass retries on its own when no signal ever comes', async () =>
   }
 })
 
-test('the bar folds the whole dormant block and reveals it again with its dots intact', async () => {
+test('dormant rows stay in flow and keep their own dots', async () => {
   const now = Date.now()
   const sessions = [
     session('a1', 'Active one', now - 30 * 60 * 1000),
@@ -2294,134 +2379,37 @@ test('the bar folds the whole dormant block and reveals it again with its dots i
   const workspaces = [{
     workspaceId: 'w1', path: '/w1', title: 'w1', sessionIds: sessions.map((s) => s.id),
   }]
-  const { rows, section, env, tearDown } = await mount({
+  const { rows, section, tearDown } = await mount({
     sections: [{ title: 'w1', rows: sessions.map((s) => rowSpec(s.id, s.displayTitle)) }],
     sessions,
     workspaces,
     uiSession: makeUiSession({ d2: PENDING_STATUS, d3: UNREAD_STATUS }),
   })
   try {
-    const bar = markerChild(section, 'fold-bar')
-    assert.ok(bar !== null, 'the dormant block is folded away')
-    assert.equal(bar.children[0].children[1].textContent, '3 条历史会话', 'the whole zone, no quota')
-    assert.equal(rows.d1.style.display, 'none')
-    assert.equal(rows.d2.style.display, 'none')
-    assert.equal(rows.d3.style.display, 'none')
-    assert.equal(rowEl(rows.d2).style.opacity, '0.5', 'hidden, but already faded for its return')
-    bar.children[0].click()
-    env.flushTimers()
-    assert.equal(rows.d1.style.display, undefined, 'the revealed block is back in flow')
+    assert.equal(markerChild(section, 'fold-bar'), null, 'this feature injects no fold row')
+    assert.equal(rows.d1.style.display, undefined,
+      'nothing hides without a host expand button to reuse — hidden rows need a way back')
     assert.equal(rows.d2.style.display, undefined)
     assert.equal(rows.d3.style.display, undefined)
-    assert.equal(rowEl(rows.d2).style.opacity, '0.5', 'and stays visually secondary')
-    assert.equal(rowEl(rows.d2).getAttribute('data-dsh-ux-zone'), null, 'revealed is not Active')
-    assert.equal(dotIn(rowEl(rows.d2)).dataset.dshUxKind, 'waiting', 'a revealed row keeps its own dot')
+    assert.equal(rowEl(rows.d2).style.opacity, '0.5', 'dormant rows still read secondary')
+    assert.equal(rowEl(rows.d2).getAttribute('data-dsh-ux-zone'), null, 'in flow is not Active')
+    assert.equal(dotIn(rowEl(rows.d2)).dataset.dshUxKind, 'waiting', 'a dormant row keeps its own dot')
     assert.equal(dotIn(rowEl(rows.d3)).dataset.dshUxKind, 'unread')
-    assert.equal(rows.d1.style.order, '13', 'the revealed rows stay below the Active block')
+    assert.equal(rows.d1.style.order, '13', 'the dormant block sits below the Active block (button slot 12 stays free)')
     assert.equal(rows.d2.style.order, '14')
-    // Issue 4: the bar does NOT retire on reveal — it stays as the collapse
-    // control, so one control owns one state and nothing is stranded open.
-    const bar2 = markerChild(section, 'fold-bar')
-    assert.ok(bar2 !== null, 'the bar stays to fold the block back')
-    assert.equal(bar2.children[0].children[1].textContent, '收起历史会话')
-    assert.equal(bar2.children[0].getAttribute('aria-expanded'), 'true')
-    assert.equal(bar2.style.order, '12', 'the collapse control sits between the blocks')
-    bar2.children[0].click()
-    env.flushTimers()
-    assert.equal(rows.d1.style.display, 'none', 'a second click folds the block back')
-    assert.equal(rows.d3.style.display, 'none')
-    assert.equal(markerChild(section, 'fold-bar').children[0].children[1].textContent, '3 条历史会话')
+    assert.equal(rows.d3.style.order, '15')
   } finally {
     tearDown()
   }
 })
 
-test('the bar opens on a click even while the pointer is inside the tree', async () => {
-  // Reported live: with the pointer parked over the sidebar, 【N 条历史会话】吞掉了
-  // 自己的点击 — the pointer is inevitably inside the tree when a real click lands
-  // (pointerover fires first), so the reveal must never wait for pointerout.
-  const now = Date.now()
-  const sessions = [
-    session('a1', 'Active one', now - 30 * 60 * 1000),
-    session('d1', 'Dormant one', now - 25 * HOUR_MS),
-    session('d2', 'Dormant two', now - 30 * HOUR_MS),
-  ]
-  const { rows, section, env, tearDown } = await mount({
-    sections: [{ title: 'w1', rows: sessions.map((s) => rowSpec(s.id, s.displayTitle)) }],
-    sessions,
-    workspaces: [{ workspaceId: 'w1', path: '/w1', title: 'w1', sessionIds: sessions.map((s) => s.id) }],
-    uiSession: makeUiSession({}),
-  })
-  try {
-    assert.equal(rows.d1.style.display, 'none', 'the dormant block starts folded')
-    env.listeners.pointerover[0]({
-      target: { closest: (sel) => (sel === '[role="tree"]' ? 'tree' : null) },
-    })
-    const bar = markerChild(section, 'fold-bar')
-    assert.ok(bar !== null, 'the fold bar is there to click')
-    bar.children[0].click()
-    env.flushTimers()
-    assert.equal(rows.d1.style.display, undefined, 'the click reveals the block at once')
-    assert.equal(rows.d2.style.display, undefined)
-    assert.equal(markerChild(section, 'fold-bar').children[0].children[1].textContent, '收起历史会话')
-    // The same click a moment later closes it again: the pierce is not a one-way
-    // door, and the pass that answers it must actually run the fold both ways.
-    markerChild(section, 'fold-bar').children[0].click()
-    env.flushTimers()
-    assert.equal(rows.d1.style.display, 'none', 'a second frozen click folds the block back')
-    assert.equal(rows.d2.style.display, 'none')
-    assert.equal(markerChild(section, 'fold-bar').children[0].children[1].textContent, '2 条历史会话')
-  } finally {
-    tearDown()
-  }
-})
-
-test('a frozen click on the bar still lets the proxied host expansion through', async () => {
-  // The host's own truncation is React state: the click only proxies it, and our
-  // layer converges on a LATER pass. With the pointer parked inside the tree that
-  // pass used to be frozen too, so the block stayed shut even though the host had
-  // been told to open it.
-  const now = Date.now()
-  const sessions = [
-    session('a1', 'Active one', now - 30 * 60 * 1000),
-    session('d1', 'Dormant one', now - 25 * HOUR_MS),
-  ]
-  const status = makeUiSession({})
-  const { rows, section, button, env, tearDown } = await mount({
-    sections: [{
-      title: 'w1',
-      rows: sessions.map((s) => rowSpec(s.id, s.displayTitle)),
-      button: 'collapsed',
-    }],
-    sessions,
-    workspaces: [{ workspaceId: 'w1', path: '/w1', title: 'w1', sessionIds: ['a1', 'd1'] }],
-    uiSession: status,
-  })
-  try {
-    button.textContent = '展开其余 2 个会话'
-    // The stub host: pressing it is what React's onClick would do — flip its own
-    // aria-expanded, and send NO store signal at all.
-    button.addEventListener('click', () => button.setAttribute('aria-expanded', 'true'))
-    env.listeners.pointerover[0]({
-      target: { closest: (sel) => (sel === '[role="tree"]' ? 'tree' : null) },
-    })
-    const bar = markerChild(section, 'fold-bar')
-    bar.children[0].click()
-    // The click's own pass, then the bounded follow-up that picks the host's new
-    // state up. THREE flushes: the timer body, the armed retry, and the pass that
-    // retry schedules.
-    env.flushTimers()
-    env.flushTimers()
-    env.flushTimers()
-    assert.equal(rows.d1.style.display, undefined, 'the proxied host expansion lands while frozen')
-    assert.equal(markerChild(section, 'fold-bar'), null, 'our bar retires: the host control is the reveal truth')
-    assert.equal(button.style.display, undefined, 'and the host button comes back')
-  } finally {
-    tearDown()
-  }
-})
-
-test('the bar absorbs the host overflow count and hides its button', async () => {
+test('the host overflow button is pinned below the Active block and folds the history away', async () => {
+  // User rule: no fold row of our own — the host's own 展开其余 N 个会话 is the
+  // one expand control. Where there is an Active block AND that button, the
+  // dormant rows hide entirely (the host's 5-row quota renders some of them;
+  // one showing below the pin was the reported leak) and the button holds the
+  // slot directly below the block. Its click reveals the section for the rest
+  // of the page load.
   const now = Date.now()
   const sessions = [
     session('a1', 'Active one', now - 30 * 60 * 1000),
@@ -2443,31 +2431,174 @@ test('the bar absorbs the host overflow count and hides its button', async () =>
     uiSession: status,
   })
   try {
-    // The host's own truncation row ('展开其余 3 个会话'): collapsed, with a count.
     button.textContent = '展开其余 3 个会话'
-    button.addEventListener('click', () => { button.clicks = (button.clicks || 0) + 1 })
     status.setStatuses({})
     env.flushTimers()
-    const bar = markerChild(section, 'fold-bar')
-    assert.ok(bar !== null, 'the bar owns the section one truncation row')
-    assert.equal(bar.children[0].children[1].textContent, '5 条历史会话',
-      'the two dormant rows plus the three the host hides')
-    assert.equal(button.style.display, 'none', 'the host button steps aside while the bar shows')
-    bar.children[0].click()
+    assert.equal(button.style.order, '11', 'the button holds the slot directly below the one-row Active block')
+    assert.equal(button.style.display, undefined, 'the button is never hidden')
+    assert.equal(markerChild(section, 'fold-bar'), null, 'no fold row beside it')
+    assert.equal(rows.d1.style.display, 'none', 'the rendered dormant rows are folded away')
+    assert.equal(rows.d2.style.display, 'none')
+    assert.equal(rows.d1.style.order, '12', 'hidden, but still ranked below the button')
+    assert.equal(rows.d2.style.order, '13')
+    // A second Active row moves the pin with the block — the button never
+    // falls inside or below the Active rows.
+    status.setStatuses({ d1: RUNNING_STATUS })
     env.flushTimers()
-    assert.equal(button.clicks, 1, 'the bar proxies the host expand')
-    // Issue 4: the reveal FOLLOWS the host's own aria-expanded — the stub host
-    // has not expanded yet, so the click alone reveals nothing and no row can
-    // be stranded open while the host thinks it is collapsed.
-    assert.equal(rows.d1.style.display, 'none', 'the host state is the reveal truth')
-    assert.equal(button.style.display, 'none', 'the host button stays absorbed while collapsed')
+    assert.equal(button.style.order, '12', 'the pin follows the block as it grows')
+    assert.equal(rows.d2.style.order, '13', 'and the remaining dormant row stays below it')
+    assert.equal(rows.d1.style.display, undefined, 'a row that turns Active leaves the fold')
+    // An expanded host (its label now 收起) keeps the same pin while the
+    // section is still folded: one control, one place, whatever its state.
     button.setAttribute('aria-expanded', 'true')
+    button.textContent = '收起'
     status.setStatuses({})
     env.flushTimers()
-    assert.equal(rows.d1.style.display, undefined, 'the host expansion reveals this block too')
+    assert.equal(button.style.order, '11', 'the collapse control keeps the block slot too')
+    assert.equal(button.style.display, undefined)
+    // The press reveals: the block opens AND the button goes back to the
+    // host's native place — the very bottom, below every session (user rule:
+    // an open section looks exactly like the host's own expanded list).
+    button.setAttribute('aria-expanded', 'false')
+    button.textContent = '展开其余 3 个会话'
+    status.setStatuses({})
+    env.flushTimers()
+    button.click()
+    env.flushTimers()
+    assert.equal(rows.d1.style.display, undefined, 'the press revealed the block')
     assert.equal(rows.d2.style.display, undefined)
-    assert.equal(markerChild(section, 'fold-bar'), null, 'everything is visible: the bar retires')
-    assert.equal(button.style.display, undefined, 'and the host control comes back')
+    assert.equal(button.style.order, '999', 'the open button sits below every session')
+    status.setStatuses({})
+    env.flushTimers()
+    assert.equal(rows.d1.style.display, undefined, 'and the reveal survives later passes')
+    // 收起 closes it again: the fold returns, the pin returns.
+    button.setAttribute('aria-expanded', 'true')
+    button.textContent = '收起'
+    status.setStatuses({})
+    env.flushTimers()
+    button.click()
+    env.flushTimers()
+    assert.equal(rows.d1.style.display, 'none', 'the 收起 click re-folds the block')
+    assert.equal(rows.d2.style.display, 'none')
+    assert.equal(button.style.order, '11', 'and the button is pinned below the block again')
+  } finally {
+    tearDown()
+  }
+})
+
+test('a host overflow-button click pierces the freeze even while the pointer is inside the tree', async () => {
+  // Reported live: with the pointer parked over the sidebar, the truncation
+  // control swallowed its own click — the pointer is inevitably inside the
+  // tree when a real click lands (pointerover fires first), so the pass
+  // answering the host button's click must never wait for pointerout. The
+  // stub host is React-realistic: the click RENDERS the next row and relabels
+  // the button, and sends NO store signal at all.
+  const now = Date.now()
+  const sessions = [
+    session('a1', 'Active one', now - 30 * 60 * 1000),
+    session('d1', 'Dormant one', now - 25 * HOUR_MS),
+    session('d2', 'Dormant two', now - 30 * HOUR_MS),
+    session('d3', 'Dormant three', now - 31 * HOUR_MS),
+    session('d4', 'Dormant four', now - 32 * HOUR_MS),
+    session('d5', 'Dormant five', now - 33 * HOUR_MS),
+  ]
+  const status = makeUiSession({})
+  const { rows, section, button, env, tearDown } = await mount({
+    sections: [{
+      title: 'w1',
+      rows: [
+        rowSpec('a1', 'Active one'), rowSpec('d1', 'Dormant one'), rowSpec('d2', 'Dormant two'),
+        rowSpec('d3', 'Dormant three'), rowSpec('d4', 'Dormant four'),
+      ],
+      button: 'collapsed',
+    }],
+    sessions,
+    workspaces: [{ workspaceId: 'w1', path: '/w1', title: 'w1', sessionIds: sessions.map((s) => s.id) }],
+    uiSession: status,
+  })
+  try {
+    button.textContent = '展开其余 1 个会话'
+    let d5wrap = null
+    button.addEventListener('click', () => {
+      d5wrap = appendHostRow(section, 'd5', 'Dormant five6分钟')
+      button.setAttribute('aria-expanded', 'true')
+      button.textContent = '收起'
+    })
+    status.setStatuses({})
+    env.flushTimers()
+    assert.equal(rows.d1.style.display, 'none', 'the rendered dormant rows start folded away')
+    env.listeners.pointerover[0]({
+      target: { closest: (sel) => (sel === '[role="tree"]' ? 'tree' : null) },
+    })
+    button.click()
+    // The click's OWN pass — the very first flush, with the pointer still
+    // inside the tree: the section is revealed and the freshly rendered row
+    // is ranked on the spot.
+    env.flushTimers()
+    assert.ok(d5wrap !== null, 'the stub host rendered the row the click asked for')
+    assert.equal(d5wrap.style.order, '16', 'the answering pass ran through the freeze')
+    assert.equal(rowEl(d5wrap).style.height, '26px', 'and dressed the new row')
+    assert.equal(rows.d1.style.display, undefined, 'the press revealed the folded block too')
+  } finally {
+    tearDown()
+  }
+})
+
+test('the pass that answers a host expand click waits out the host row glide', async () => {
+  // Reported live: clicking 【展开其余 N 个会话】 made the list flicker once. The
+  // host's AnimatedRows fades entering rows for 100ms and glides moved rows
+  // for 200ms (WAAPI transforms, which override inline styles until they
+  // finish); a restyle or FLIP transform landing mid-glide snaps into place
+  // when the glide ends. The answering pass now waits the glide out — and the
+  // new row is still dressed, while ambient passes stay immediate.
+  const now = Date.now()
+  const sessions = [
+    session('a1', 'Active one', now - 30 * 60 * 1000),
+    session('d1', 'Dormant one', now - 25 * HOUR_MS),
+    session('d2', 'Dormant two', now - 30 * HOUR_MS),
+    session('d3', 'Dormant three', now - 31 * HOUR_MS),
+    session('d4', 'Dormant four', now - 32 * HOUR_MS),
+    session('d5', 'Dormant five', now - 33 * HOUR_MS),
+  ]
+  const status = makeUiSession({})
+  const { section, button, env, tearDown } = await mount({
+    sections: [{
+      title: 'w1',
+      rows: [
+        rowSpec('a1', 'Active one'), rowSpec('d1', 'Dormant one'), rowSpec('d2', 'Dormant two'),
+        rowSpec('d3', 'Dormant three'), rowSpec('d4', 'Dormant four'),
+      ],
+      button: 'collapsed',
+    }],
+    sessions,
+    workspaces: [{ workspaceId: 'w1', path: '/w1', title: 'w1', sessionIds: sessions.map((s) => s.id) }],
+    uiSession: status,
+  })
+  try {
+    button.textContent = '展开其余 1 个会话'
+    let d5wrap = null
+    button.addEventListener('click', () => {
+      d5wrap = appendHostRow(section, 'd5', 'Dormant five6分钟')
+      button.setAttribute('aria-expanded', 'true')
+      button.textContent = '收起'
+    })
+    status.setStatuses({})
+    env.flushTimers()
+    const before = env.timerDelays.length
+    button.click()
+    const pushed = env.timerDelays.slice(before)
+    assert.equal(pushed[0], 220, 'the answering pass waits the host glide (200ms + margin)')
+    env.flushTimers()
+    env.flushTimers()
+    assert.equal(d5wrap.style.order, '16', 'the new row is still dressed after the wait')
+    const beforeAmbient = env.timerDelays.length
+    status.setStatuses({ a1: RUNNING_STATUS })
+    assert.ok(env.timerDelays.length > beforeAmbient, 'the status change scheduled a pass')
+    assert.ok(
+      env.timerDelays.slice(beforeAmbient).every((ms) => ms === 0),
+      'ambient passes keep their 0ms delay',
+    )
+    env.flushTimers()
   } finally {
     tearDown()
   }
@@ -2497,25 +2628,27 @@ test('the periodic tick re-zones a row whose 24 hours ran out', async () => {
     assert.equal(intervals.length, 1, 'one shared tick drives the labels and the zone recompute')
     assert.equal(intervals[0].ms, 60000, 'the faster of the two needs (60s labels, 5min zones)')
     assert.equal(rowEl(rows.a1).getAttribute('data-dsh-ux-zone'), 'active')
-    assert.equal(markerChild(section, 'fold-bar').children[0].children[1].textContent, '1 条历史会话')
+    assert.ok(markerChild(section, 'zone-band') !== null, 'the Active block wears its band')
     // Ten minutes later: nothing in the data layer changed, only the clock. The
     // tick is the only thing that can move the row across the zone boundary.
     sessions[0].updatedAt = now - DAY_MS - 10 * 60 * 1000
     intervals[0].fn()
     env.flushTimers()
     assert.equal(rowEl(rows.a1).getAttribute('data-dsh-ux-zone'), null, 'the row left the Active zone')
-    assert.equal(rows.a1.style.display, 'none', 'and folded into the dormant block')
+    assert.equal(rows.a1.style.display, undefined, 'the section went all-dormant: it is handed back to the host')
     assert.equal(rowEl(rows.a1).style.opacity, '0.5')
-    assert.equal(markerChild(section, 'fold-bar').children[0].children[1].textContent, '2 条历史会话')
+    assert.equal(markerChild(section, 'fold-bar'), null, 'the bar retires with the Active block')
   } finally {
     tearDown()
   }
 })
 
-test('an all-dormant section with host truncation folds everything behind one bar', async () => {
-  // The host renders 5 of 19 rows (its own quota) and the replay mirrors that
-  // slice, so the bar speaks for BOTH truncations — and one click round-trip
-  // (issue 4) opens and closes everything together, following the host state.
+test('an all-dormant section is handed to the host: no fold row, native button place', async () => {
+  // User rule: a workspace with no Active conversation must open straight into
+  // the host's own logic — the host's truncation is incremental (+5 per click)
+  // and a fold row over the same tail cost the user a second click. The layer
+  // keeps its dressing (ranks, compact rows, dots) but touches the button's
+  // place only once a row turns Active.
   const now = Date.now()
   const sessions = []
   for (let i = 0; i < 19; i += 1) {
@@ -2540,23 +2673,84 @@ test('an all-dormant section with host truncation folds everything behind one ba
     button.textContent = '展开其余 14 个会话'
     status.setStatuses({})
     env.flushTimers()
-    const bar = markerChild(section, 'fold-bar')
-    assert.ok(bar !== null, 'the bar owns the section even when every row is dormant')
-    assert.equal(bar.children[0].children[1].textContent, '19 条历史会话',
-      'the five rows this feature hides plus the fourteen the host hides')
-    assert.equal(button.style.display, 'none', 'the host button steps aside')
-    assert.equal(rows.s00.style.display, 'none', 'a dormant rendered row is folded too')
-    button.setAttribute('aria-expanded', 'true')
-    // Host realism: raising the quota RENDERS the rows it was hiding — the
-    // section is self-consistent only once the DOM holds all 19 — and the host
-    // keeps the same control, now reading 收起.
-    for (const s of sessions.slice(5)) appendHostRow(section, s.id, `${s.displayTitle}6分钟`)
-    button.textContent = '收起'
+    assert.equal(markerChild(section, 'fold-bar'), null, 'no fold row: the host owns an all-dormant section')
+    assert.equal(button.style.display, undefined, 'the host button works natively')
+    assert.equal(button.style.order, '999', 'and keeps the host native last place without an Active block')
+    assert.equal(rows.s00.style.display, undefined, 'no row is folded away')
+    assert.equal(rows.s00.style.order, '10', 'the dressing (ranks) still lands')
+    // A session starting to run gives the section an Active block — from that
+    // pass on the section gets the full treatment: the button pinned below the
+    // block and the dormant rows folded away behind it.
+    status.setStatuses({ s00: RUNNING_STATUS })
+    env.flushTimers()
+    assert.equal(button.style.order, '11', 'the button is pinned below the new Active block')
+    assert.equal(rows.s01.style.order, '12', 'hidden rows keep their ranks below the pin')
+    assert.equal(rows.s01.style.display, 'none', 'the dormant rows fold away behind the pin')
+  } finally {
+    tearDown()
+  }
+})
+
+test('an incrementally truncating host never bounces: the press reveals and stays revealed', async () => {
+  // The reported bounce, in the reused-control shape: the host expands +5
+  // rows per click and flips its aria-expanded only at FULL expansion, so a
+  // reveal that followed that attribute folded the freshly expanded rows
+  // straight back. The press now reveals the section for the rest of the
+  // page load; the pin holds its slot through every click.
+  const now = Date.now()
+  const sessions = [
+    session('a1', 'Active one', now - 30 * 60 * 1000),
+    session('d1', 'Dormant one', now - 25 * HOUR_MS),
+    session('d2', 'Dormant two', now - 30 * HOUR_MS),
+  ]
+  const status = makeUiSession({})
+  const { rows, section, button, env, tearDown } = await mount({
+    sections: [{
+      title: 'w1',
+      rows: [rowSpec('a1', 'Active one'), rowSpec('d1', 'Dormant one'), rowSpec('d2', 'Dormant two')],
+      button: 'collapsed',
+    }],
+    sessions,
+    workspaces: [{ workspaceId: 'w1', path: '/w1', title: 'w1', sessionIds: ['a1', 'd1', 'd2'] }],
+    uiSession: status,
+  })
+  try {
+    // The stub host with REAL semantics: one click = quota +5, aria-expanded
+    // stays false until nothing is hidden, the label counts what remains.
+    let hidden = 10
+    button.textContent = `展开其余 ${hidden} 个会话`
+    button.addEventListener('click', () => {
+      hidden -= 5
+      if (hidden > 0) button.textContent = `展开其余 ${hidden} 个会话`
+      else {
+        button.setAttribute('aria-expanded', 'true')
+        button.textContent = '收起'
+      }
+    })
     status.setStatuses({})
     env.flushTimers()
-    assert.equal(markerChild(section, 'fold-bar'), null, 'the host expansion reveals everything')
-    assert.equal(rows.s00.style.display, undefined)
-    assert.equal(button.style.display, undefined, 'and the host control comes back as 收起')
+    assert.equal(button.style.order, '11', 'the button is pinned below the one-row Active block')
+    assert.equal(rows.d1.style.display, 'none', 'the history starts fully hidden')
+    assert.equal(rows.d2.style.display, 'none')
+    button.click()
+    env.flushTimers()
+    assert.equal(rows.d1.style.display, undefined, 'the press revealed the block...')
+    assert.equal(rows.d2.style.display, undefined, '...and the answering pass does NOT fold it back')
+    assert.equal(button.style.order, '999', 'the open button sits below every session, like the host')
+    button.click()
+    env.flushTimers()
+    assert.equal(button.getAttribute('aria-expanded'), 'true', 'the stub host is fully expanded')
+    assert.equal(rows.d1.style.display, undefined, 'still revealed after the second click')
+    assert.equal(button.style.order, '999', 'the 收起 keeps the native bottom place too')
+    assert.equal(button.style.display, undefined)
+    assert.equal(markerChild(section, 'fold-bar'), null, 'no fold row appeared at any point')
+    // 收起 — a click while the host reports nothing hidden (aria-expanded
+    // true, label 收起): the fold and the pin come back, the section reads
+    // collapsed again.
+    button.click()
+    env.flushTimers()
+    assert.equal(rows.d1.style.display, 'none', 'the 收起 click re-folds the block')
+    assert.equal(button.style.order, '11', 'and re-pins the button below the Active block')
   } finally {
     tearDown()
   }
@@ -2716,9 +2910,12 @@ test('a transient count drift keeps the green band: the section holds its last c
     const rank = rows.a8.style.order
     assert.ok(rank !== undefined)
 
-    // The host committed a row our replay does not explain yet (its own
-    // mutation is what scheduled this pass). That is 'unknown', not 'wrong'.
-    const drifted = appendHostRow(section, 'a3', 'A 36分钟')
+    // The host committed a row our replay does not explain yet — a session
+    // the store has not published (its own mutation is what scheduled this
+    // pass). That is 'unknown', not 'wrong'. (A row for a KNOWN member is no
+    // drift under the watermark model: the host grows its slice exactly that
+    // way, one row at the tail per watermark raise.)
+    const drifted = appendHostRow(section, 'zz', 'Ghost 1分钟')
     status.setStatuses({ run: RUNNING_STATUS })
     env.flushTimers()
     assert.ok(markerChild(section, 'zone-band') !== null, 'the band rides out the drift')
@@ -2743,7 +2940,7 @@ test('an unexplained count that persists hands the section back: band out, host 
     env.flushTimers()
     assert.ok(markerChild(section, 'zone-band') !== null)
     button.textContent = '展开其余 3 个会话'
-    appendHostRow(section, 'a3', 'A 36分钟')
+    appendHostRow(section, 'zz', 'Ghost 1分钟')
     // The divergence never heals: after the grace the layer steps aside for good
     // (presentation never guesses), which is the behavior the grace replaces for
     // one beat.
@@ -2753,14 +2950,13 @@ test('an unexplained count that persists hands the section back: band out, host 
     }
     assert.equal(markerChild(section, 'zone-band'), null, 'the band is released')
     assert.equal(section.style.isolation, undefined, 'and the stacking context with it')
-    assert.equal(rows.a8.style.display, undefined, 'the folded rows are handed back')
-    // The step-aside gives up the band and the fold (which would strand at stale
-    // geometry); the ranks a consistent pass verified are left on the rows.
+    assert.equal(rows.a8.style.display, undefined, 'anything hidden on an older pass is handed back')
+    // The step-aside gives up the band (which would strand at stale geometry);
+    // the ranks a consistent pass verified are left on the rows — including the
+    // button's pin, and the button was never hidden in the first place.
     assert.equal(rows.a8.style.order, '11')
-    assert.equal(button.style.display, 'none', 'the host button steps aside')
-    const bar = markerChild(section, 'fold-bar')
-    assert.ok(bar !== null, 'the bar still speaks for the count we cannot explain')
-    assert.equal(bar.children[0].children[1].textContent, '3 条历史会话')
+    assert.equal(button.style.display, undefined, 'the host button was never hidden')
+    assert.equal(markerChild(section, 'fold-bar'), null, 'and no fold row takes its place')
   } finally {
     tearDown()
   }
@@ -2790,12 +2986,12 @@ test('the freeze has a lifetime: a deferred pass runs once both retries are spen
     status.setStatuses({ d2: RUNNING_STATUS })
     env.flushTimers()
     assert.equal(rows.d2.style.order, '13', 'the freeze still protects the resting cursor')
-    assert.equal(rows.d2.style.display, 'none', 'and nothing moved')
+    assert.equal(rowEl(rows.d2).getAttribute('data-dsh-ux-zone'), null, 'and nothing was re-zoned')
     // Two retries, then the pass runs on its own instead of waiting forever for
     // a pointerout that a user working in the sidebar never sends.
     for (let i = 0; i < 8; i += 1) env.flushTimers()
     assert.equal(rows.d2.style.order, '11', 'd2 leads the dormant block now')
-    assert.equal(rows.d2.style.display, undefined, 'a running row is never folded away')
+    assert.equal(rowEl(rows.d2).getAttribute('data-dsh-ux-zone'), 'active', 'the zone move landed with it')
     // The lifetime is spent, not renewed: a pass that pierced the freeze must not
     // re-arm the two retries, or a resting pointer would be repainted forever.
     assert.equal(env.timers.filter(Boolean).length, 0, 'the spent budget stays spent')

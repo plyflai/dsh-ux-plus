@@ -1,6 +1,6 @@
 /**
  * Host half of dsh-ux-plus: the `ux-plus` per-feature switch section plus the
- * five private feature modules under features/.
+ * six private feature modules under features/.
  *
  * Two switch layers: the outer on/off is the host's native Plugins card
  * (this package's single self-referential patch row); the inner per-feature
@@ -18,6 +18,7 @@ import { feature as workspaceSessionMenu } from '../features/workspace-session-m
 import { feature as workspaceRecencyOrder } from '../features/workspace-recency-order/src/index.js'
 import { feature as toolAskQuestionExpanded } from '../features/tool-ask-question-expanded/src/index.js'
 import { feature as workspaceSessionInherit } from '../features/workspace-session-inherit/src/index.js'
+import { feature as attentionFavicon } from '../features/attention-favicon/src/index.js'
 import z from '@deepseek-ai/schemastery'
 
 /** Stable Cordis plugin name. */
@@ -26,8 +27,8 @@ export const name = 'dsh-ux-plus'
 /** Per-feature switch section (D3): one boolean per frozen feature id, all on by default. */
 export const UX_PLUS_NAMESPACE = 'ux-plus'
 
-/** The five feature modules in frozen order. */
-export const FEATURES = [conversationTypography, workspaceSessionMenu, workspaceRecencyOrder, toolAskQuestionExpanded, workspaceSessionInherit]
+/** The six feature modules in frozen order. */
+export const FEATURES = [conversationTypography, workspaceSessionMenu, workspaceRecencyOrder, toolAskQuestionExpanded, workspaceSessionInherit, attentionFavicon]
 
 
 /** Host configuration for the per-feature UX Plus switches. */
@@ -37,6 +38,7 @@ export const Config = z.object({
   'workspace-recency-order': z.boolean().default(true),
   'tool-ask-question-expanded': z.boolean().default(true),
   'workspace-session-inherit': z.boolean().default(true),
+  'attention-favicon': z.boolean().default(true),
 }).volatile()
 
 /**

@@ -6,7 +6,7 @@ const root = new URL('../', import.meta.url)
 const readJson = async (name) => JSON.parse(await readFile(new URL(name, root), 'utf8'))
 
 /** Frozen feature sub-package names (plan §3.8, directory names). */
-const FEATURES = ['conversation-typography', 'workspace-session-menu', 'workspace-recency-order', 'tool-ask-question-expanded', 'workspace-session-inherit']
+const FEATURES = ['conversation-typography', 'workspace-session-menu', 'workspace-recency-order', 'tool-ask-question-expanded', 'workspace-session-inherit', 'attention-favicon']
 
 /**
  * Collect `- id:` rows (with their following `name:`) from a patch document.

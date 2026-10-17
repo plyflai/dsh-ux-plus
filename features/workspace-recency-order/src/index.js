@@ -90,7 +90,7 @@
  *   - row ranking: zone first (the Active block above the dormant block), then
  *     lastActive desc, then id ascending. The current blank row and
  *     non-archived pins keep the host's positions and count as Active — a pin
- *     is never folded away behind the bar.
+ *     is never ranked out of the Active block.
  *   - status dots (`statusOf`), one injected 7px dot per row instead of every
  *     status word: waiting (#f59e0b solid, 2s breathing halo), running
  *     (#3b82f6 ring spinner), unread (#22c55e solid, static); no status, no
@@ -100,7 +100,7 @@
  *     drawn twice.
  *   - the status source is `deps.uiSession.sessionStatus` — the ONE
  *     authoritative source of the sidebar's three indicators. Without it
- *     (degraded mode) there is no zone, no dot and no bar: this feature then
+ *     (degraded mode) there is no zone and no dot: this feature then
  *     behaves exactly as it did before the layer existed (pure recency).
  *   - Active-block visuals: a continuous green support (rgba(34,197,94,0.07)
  *     per row, 6px radius on the block's first and last row — attributes plus
@@ -114,14 +114,26 @@
  *     told apart by its band and dots, never by a taller row. Every written
  *     property is cached and restored by dispose, so switching the feature off
  *     gives the host's own metrics back exactly.
- *   - dormant bar (`foldBarText`): the dormant block is collapsed by default
- *     behind ONE thin bar (`count 条历史会话`, a 1px line on either side). The
- *     bar doubles as the host's truncation control: while the host overflow
- *     button is collapsed its hidden count joins the bar and the button itself
- *     is hidden. Dormant rows stay in the DOM (display:none only), so the row
- *     pairing count still matches. A click reveals the dormant block for the
- *     rest of the page load (its rows keep their own dots) and proxies the
- *     host's expand click.
+ *   - truncation (user rule): this feature adds NO fold row of its own — the
+ *     host's own overflow button (展开其余 N 个会话 / Expand N more sessions) is
+ *     the one expand control, reused for both systems. While a section is
+ *     FOLDED (it has an Active block AND that button AND the user has not
+ *     opened it), the dormant rows are hidden ENTIRELY (display:none, still
+ *     in the DOM) and the button is pinned DIRECTLY BELOW the Active block
+ *     (its rank slot is reserved between the blocks, so the pin holds however
+ *     many rows the block holds) — before the first click only the Active
+ *     block shows. The button's click toggles the section (a page-load Set,
+ *     never persisted state): an expand click reveals it — the answering pass
+ *     keeps every row the host renders visible (following the host's
+ *     aria-expanded alone was the reported bounce — it flips only at FULL
+ *     expansion) and the button goes back to the host's native place, the
+ *     very bottom below every session, so an open section reads exactly like
+ *     the host's own expanded list; a 收起 click (aria-expanded true at click
+ *     time) re-folds the block and re-pins the button. Either click marks a
+ *     user action (markUserActionOn), so the answering pass pierces the
+ *     anti-churn freeze and waits the host's row glide out. Where every
+ *     session is dormant, or the host renders no button (nothing to reuse,
+ *     nothing to bring back), the section behaves exactly like the host.
  *   - workspace badge: the group header shows up to three 7px dots (waiting,
  *     unread, running) for the attention the Active block is hiding — never
  *     for the dormant block, whose status never floats up. The header carries
@@ -131,10 +143,10 @@
  *     revealed on hover (opacity 0 → 1 through the injected style tag, hidden
  *     again while the row's menu is open, where the actions take the space).
  *   - row ranking: leading rows (the current blank + non-archived pins) keep
- *     the host's positions — and they are Active for that reason alone, so a
- *     pin is never folded away; everything else ranks by zone (the Active block
- *     first), then lastActivity desc, then id ascending. Archived rows keep
- *     today's treatment exactly (host row, no band, no dot, no fold).
+ *     the host's positions — and they are Active for that reason alone;
+ *     everything else ranks by zone (the Active block first), then
+ *     lastActivity desc, then id ascending. Archived rows keep today's
+ *     treatment exactly (host row, no band, no dot).
  *   - group layer: a workspace with a running or pending member is lifted to
  *     "now" (it is active right now even if nothing was written for hours) and
  *     the 24h auto-collapse skips it; an unread completion never lifts a group.
@@ -145,7 +157,13 @@
  *     never arrive. ONE thing pierces the freeze: a change in the host's view
  *     mode (分组方式 / 排序方式 / 筛选会话) restyles immediately with no FLIP — the
  *     freeze protects the cursor from ambient churn, not the user from their own
- *     click. The idle sub-pass never pierces (it clicks rows to collapse).
+ *     click. The pass that answers a user click (a host overflow-button click
+ *     is one — markUserActionOn) waits out the host's row glide
+ *     (HOST_GLIDE_MS — AnimatedRows fades entering rows 100ms and glides moved
+ *     rows 200ms with WAAPI transforms) and never FLIPs: restyling or
+ *     inline-transforming mid-glide is what made the list flicker once right
+ *     after 【展开其余 N 个会话】 was clicked, and every later pass lands on
+ *     settled rows. The idle sub-pass never pierces (it clicks rows to collapse).
  *   - FLIP: rows that moved more than 4px are translated back to their old
  *     position for one frame, then animated over FLIP_MS (best-effort and
  *     scoped: skipped under prefers-reduced-motion, or where rAF /
@@ -154,20 +172,24 @@
 
 export const id = 'workspace-recency-order'
 export const title = 'Workspace recency order'
-export const description = 'ONE partition rule: last activity. A workspace\'s sessions split into an Active block (running, or updated within 24 hours) and a dormant block that collapses behind one thin bar. Each row carries a 7px status dot instead of status text, the Active block reads as a green band of slightly taller rows, and the workspace header shows up to three dots for the attention the Active block hides. Workspaces idle for 24 hours still auto-collapse (once per workspace per page load) and every row still carries its last-active age on hover.'
+export const description = 'ONE partition rule: last activity. A workspace\'s sessions split into an Active block (running, or updated within 24 hours) and a dormant block. Each row carries a 7px status dot instead of status text, the Active block reads as a green band, and the history stays fully hidden below it — the host\'s own expand button, pinned directly below the Active block, is the one control that opens and closes it. The workspace header shows up to three dots for the attention the Active block hides. Workspaces idle for 24 hours still auto-collapse (once per workspace per page load) and every row still carries its last-active age on hover.'
 export const hasGear = false
 /** Settings-row copy, assembled into the `ux-plus-settings` namespace. */
 export const settingsMessages = {
-  zh: { title: '最近活动排序', description: '只用一条判据：最后活动时间。工作区的会话分成两块——Active 区（仍在运行，或 24 小时内更新过）与默认折叠成一条细线的休眠区。每行行首是 7px 状态点，不再有状态文字；Active 区是一整块绿底、行高略高；工作区标题只上浮 Active 区被遮住的注意点（最多三个）。超过 24 小时没有更新的工作区仍会自动收起（每次打开页面每个工作区最多一次），每行仍带悬停显现的距今未更新时间。' },
-  en: { title: 'Workspace recency order', description: 'ONE partition rule: last activity. A workspace\'s sessions split into an Active block (running, or updated within 24 hours) and a dormant block that collapses behind one thin bar. Each row carries a 7px status dot instead of status text, the Active block reads as a green band of slightly taller rows, and the workspace header shows up to three dots for the attention the Active block hides. Workspaces idle for 24 hours still auto-collapse (once per workspace per page load) and every row still carries its last-active age on hover.' },
+  zh: { title: '最近活动排序', description: '只用一条判据：最后活动时间。工作区的会话分成两块——Active 区（仍在运行，或 24 小时内更新过）与休眠区。每行行首是 7px 状态点，不再有状态文字；Active 区是一整块绿底，历史在它下面整体隐藏，钉在 Active 区正下方的宿主【展开其余 N 个会话】就是唯一的展开/收起入口；工作区标题只上浮 Active 区被遮住的注意点（最多三个）。超过 24 小时没有更新的工作区仍会自动收起（每次打开页面每个工作区最多一次），每行仍带悬停显现的距今未更新时间。' },
+  en: { title: 'Workspace recency order', description: 'ONE partition rule: last activity. A workspace\'s sessions split into an Active block (running, or updated within 24 hours) and a dormant block. Each row carries a 7px status dot instead of status text, the Active block reads as a green band, and the history stays fully hidden below it — the host\'s own expand button, pinned directly below the Active block, is the one control that opens and closes it. The workspace header shows up to three dots for the attention the Active block hides. Workspaces idle for 24 hours still auto-collapse (once per workspace per page load) and every row still carries its last-active age on hover.' },
 }
 
 // ---------------------------------------------------------------------------
 // Client-side behavior.
 // ---------------------------------------------------------------------------
 
-/** Host collapsed-row limit (rows/WorkspaceBrowser.tsx:44). */
-const COLLAPSED_SESSION_LIMIT = 5
+/** Host session-watermark base (rows/WorkspaceBrowser.tsx:55): a collapsed
+ *  section renders the first N non-blank rows; blank rows always render. The
+ *  host raises the watermark to cover attention rows (running / running
+ *  subagents / awaiting / unread-done / current, within the first 50) and the
+ *  user raises it +5 per expand click (WorkspaceBrowser.tsx:640-660). */
+const SESSION_WATERMARK_BASE = 5
 
 /** Descendant-walk depth cap (host nesting: tree > section > group > section). */
 const WALK_DEPTH = 8
@@ -322,6 +344,18 @@ const DEFER_RETRY_MS = [300, 1200]
 const USER_ACTION_MS = 1000
 
 /**
+ * The host's own row animation (AnimatedRows.tsx:5-6 — 100ms fade for entering
+ * rows, 200ms WAAPI glide for rows the commit moved) plus one frame of margin.
+ * A restyle landing MID-glide changes row heights the host measured before it,
+ * and an inline FLIP transform fights the host's WAAPI transform (WAAPI wins
+ * until it finishes, then the inline value lands in one snap) — the reported
+ * one-time flicker right after 【展开其余 N 个会话】 was clicked. The pass that
+ * answers a user click waits this out; no pass FLIPs inside the user-action
+ * window.
+ */
+const HOST_GLIDE_MS = 220
+
+/**
  * How many consecutive unexplained-count passes a section keeps its last
  * consistent presentation (spec §1: a bail is 'unknown', not 'wrong'). Our
  * passes ride the host's own mutations, so the first bail after a host commit is
@@ -335,11 +369,7 @@ const DRIFT_GRACE_PASSES = 3
 /** FLIP transition duration (ms) for rows that moved. */
 const FLIP_MS = 180
 
-/** Row rank of this feature's synthetic dormant bar (the overflow button is 999). */
-const FOLD_ROW_ORDER = '998'
-
 /** Marker values this feature injects into the tree. */
-const FOLD_VALUE = 'fold-bar'
 const BADGE_VALUE = 'attention-badge'
 const DOT_VALUE = 'session-status-dot'
 const BAND_VALUE = 'zone-band'
@@ -473,30 +503,10 @@ export function statusLabel(locale, kind) {
 }
 
 /**
- * The dormant bar's text (spec §4): how many sessions the bar is hiding — the
- * whole dormant block, plus whatever the host's own truncation contributed
- * (the bar absorbs the host's count and hides its button).
- *
- * The 1px lines either side are flex decoration in the style tag, not
- * characters in this string.
- */
-export function foldBarText(locale, count) {
-  return isChinese(locale) ? `${countOf(count)} 条历史会话` : `${countOf(count)} earlier sessions`
-}
-
-/**
- * The bar's label while the block it owns is revealed (issue 4): the bar
- * stays as the collapse control, so it must say what the click does.
- */
-export function foldBarCollapseText(locale) {
-  return isChinese(locale) ? '收起历史会话' : 'Collapse history'
-}
-
-/**
  * The Active-zone members that carry attention (spec §5), split by kind: a
  * member of the workspace with a pending interaction, a live run, or an unread
  * completion — but only while it is Active. Reads the data layer only: the host
- * does not render collapsed rows beyond its quota, so counting DOM rows would
+ * does not render collapsed rows beyond its watermark, so counting DOM rows would
  * undercount exactly when the badge matters. The dormant block is deliberately
  * invisible here — a status older than 24 hours never floats up to the header.
  * Blank placeholders, subagent sessions and archived sessions are not
@@ -769,68 +779,34 @@ function renderedOrder(memberIds, key, data, view) {
 }
 
 /**
- * Host row-exemption rule (rows/WorkspaceBrowser.tsx:55-70): a row is exempt
- * from the collapsed idle quota when it is blank, running, or a parent with a
- * running subagent. Only idle rows count against the quota, so a collapsed
- * section renders more than COLLAPSED_SESSION_LIMIT rows whenever it holds a
- * running conversation (1 running + 5 idle is the common shape) — the exact
- * case where a blank-only port replays a shorter slice, trips the count gate
- * and leaves the section's row layer silently off (stale row on top, running
- * session below it).
+ * The host's watermark slice (rows/WorkspaceBrowser.tsx:60-71 over the
+ * replayed row order): blank rows always render, and only the first
+ * `watermark` non-blank rows survive. Running rows are NOT exempt — they
+ * consume the watermark like any row; the host instead RAISES the watermark
+ * to cover them (requiredWatermark, WorkspaceBrowser.tsx:74-92), so a running
+ * row beyond the base still renders, just as part of a longer slice.
  */
-function rowExempt(session, id, data) {
-  return Boolean(session.blank) || Boolean(session.running) || runningChildCount(data, id) > 0
-}
-
-/**
- * The host's running-subagent count for one parent row (tree.ts:390-395):
- * the session's `subagentCatalog` projection values, counting children whose
- * live row reports running. The host reads the ui-session status store first
- * and falls back to the list row; this feature owns no statuses service, so
- * it reads the same fallback (`byId[childId].running`). A divergence only
- * lowers the exemption count, which the count gate then fails closed on — it
- * can never paint a wrong order.
- */
-function runningChildCount(data, parentId) {
-  const projections = data.projectionsBySession
-  const catalog = projections !== undefined && projections !== null
-    ? projections[parentId]?.values?.subagentCatalog
-    : undefined
-  if (!Array.isArray(catalog)) return 0
+function watermarkRows(ids, data, watermark) {
   let count = 0
-  for (const child of catalog) {
-    const row = data.byId[child.id]
-    if (row !== undefined && row.running === true) count += 1
-  }
-  return count
-}
-
-/**
- * The host's collapsed slice (rows/WorkspaceBrowser.tsx:55-70) over the
- * replayed row order: every exempt row keeps its rendered position, and only
- * the first `limit` idle rows survive. `limit` is the host's PER-GROUP React
- * state — 5, then +5 per "展开更多" click, Infinity once nothing is hidden
- * (WorkspaceBrowser.tsx:300/581-601) — so callers must not assume the 5
- * default; collapsedShown derives the live quota from the DOM.
- */
-function collapsedRows(ids, data, limit = COLLAPSED_SESSION_LIMIT) {
-  let idle = 0
   return ids.filter((id) => {
-    if (rowExempt(data.byId[id], id, data)) return true
-    if (idle >= limit) return false
-    idle += 1
-    return true
+    const session = data.byId[id]
+    if (session !== undefined && session.blank === true) return true
+    count += 1
+    return count <= watermark
   })
 }
 
 /**
  * The slice the host actually rendered, given the row count the DOM shows.
  *
- * A truncated section renders `totalExempt + limit` rows, so the live quota
- * is derivable: `limit = domCount - exempt`. The host only ever uses 5, 10,
- * 15… (the +5 step) or the whole list, so a count that does not land on a
- * multiple of COLLAPSED_SESSION_LIMIT is drift, not a quota — the default is
- * handed to the count gate, which fails closed instead of guessing.
+ * A truncated section renders `blank + watermark` rows, so the live watermark
+ * is derivable straight from the DOM: `watermark = domCount - blank`. This is
+ * exact under the host's watermark model (0.2.1-rc.1): the base 5, the
+ * attention raise, and the user's +5 clicks all end up as one number the DOM
+ * already reports. The old model (running rows exempt, quota a multiple of 5)
+ * mis-modelled every section holding a running row — the count gate tripped,
+ * the section stepped aside, and its Active band and fold vanished together
+ * (reported live: green gone, history leaked below the expand button).
  *
  * @returns {string[] | null} the slice, or null when the whole group is
  * folded (no rows rendered while the replay expects rows).
@@ -838,11 +814,13 @@ function collapsedRows(ids, data, limit = COLLAPSED_SESSION_LIMIT) {
 function collapsedShown(expected, data, domCount) {
   if (domCount >= expected.length) return expected
   if (domCount === 0) return null
-  const exempt = expected.filter((id) => rowExempt(data.byId[id], id, data)).length
-  const limit = domCount - exempt
-  return collapsedRows(expected, data, limit > 0 && limit % COLLAPSED_SESSION_LIMIT === 0
-    ? limit
-    : COLLAPSED_SESSION_LIMIT)
+  const blank = expected.filter((id) => {
+    const session = data.byId[id]
+    return session !== undefined && session.blank === true
+  }).length
+  const watermark = domCount - blank
+  if (watermark < 0) return null
+  return watermarkRows(expected, data, watermark)
 }
 
 /**
@@ -977,7 +955,7 @@ function isSection(element) {
 function rowChildren(section) {
   const rows = []
   for (const child of section.children) {
-    // This feature's own injected children (the fold row) are never session
+    // This feature's own injected children (the Active band) are never session
     // rows: the pairing count gate and the row↔session alignment must stay
     // untouched by anything this feature adds to the tree (the host renders
     // no such child, so a marker is the only honest way to tell them apart).
@@ -1156,9 +1134,9 @@ function rowElementOf(entry) {
 /**
  * This row's zone (spec §1). Leading rows — the current blank and the user's
  * own pins — count as Active whatever their timestamp: they keep the host's
- * front positions, and folding a pin away behind the dormant bar would fight an
+ * front positions, and ranking a pin out of the Active block would fight an
  * explicit user action. Only called with a status map (degraded mode has no
- * zones, no dots and no bar at all).
+ * zones and no dots at all).
  */
 function zoneEntryOf(entry, data) {
   if (entry.leading === true) return 'active'
@@ -1412,14 +1390,6 @@ function ensureZoneBand(section, ordered, data) {
   }
 }
 
-/** This feature's injected dormant bar among a section's children, or null. */
-function findFoldRow(section) {
-  for (const child of section.children) {
-    if (child.dataset !== undefined && child.dataset !== null && child.dataset.dshUxPlus === FOLD_VALUE) return child
-  }
-  return null
-}
-
 /** Detach one element this feature injected, whichever DOM it lives in. */
 function detach(element, set) {
   if (element === undefined || element === null) return
@@ -1429,170 +1399,6 @@ function detach(element, set) {
     return
   }
   if (element.parentNode !== null && element.parentNode !== undefined) element.parentNode.removeChild(element)
-}
-
-/** One 1px hairline of the dormant bar (spec §4), flex-sized on either side. */
-function barLine() {
-  const line = document.createElement('span')
-  line.dataset.dshUxPlus = `${FOLD_VALUE}-line`
-  line.style.flex = '1 1 auto'
-  line.style.height = '1px'
-  line.style.background = 'currentColor'
-  line.style.opacity = '0.35'
-  return line
-}
-
-/**
- * Insert (or refresh) the section's dormant bar (spec §4) — the section's last
- * flex item, ranked in the slot between the Active block and the dormant block
- * it hides (the host's overflow button keeps its 999). The bar is this
- * feature's ONLY text: a centered count between two hairlines. Its click
- * reveals the dormant block for the rest of the page load only (a page-load Set
- * in client(): folding is a presentation decision, never persisted state) and,
- * while the host's own control is collapsed, proxies the host's expand click —
- * one bar drives both truncation systems instead of two stacked rows.
- */
-function ensureFoldBar(section, data, key, text, expanded, order) {
-  let bar = findFoldRow(section)
-  if (bar === null) {
-    bar = document.createElement('div')
-    bar.dataset.dshUxPlus = FOLD_VALUE
-    const button = document.createElement('button')
-    if (typeof button.setAttribute === 'function') button.setAttribute('type', 'button')
-    button.style.display = 'flex'
-    button.style.alignItems = 'center'
-    button.style.gap = '6px'
-    button.style.background = 'none'
-    button.style.border = 'none'
-    button.style.color = 'var(--dsw-alias-label-tertiary, #8a8f98)'
-    button.style.fontSize = '11px'
-    button.style.fontFamily = 'inherit'
-    button.style.cursor = 'pointer'
-    button.style.padding = '2px 8px'
-    button.style.width = '100%'
-    const label = document.createElement('span')
-    label.dataset.dshUxPlus = `${FOLD_VALUE}-label`
-    label.style.whiteSpace = 'nowrap'
-    button.appendChild(barLine())
-    button.appendChild(label)
-    button.appendChild(barLine())
-    if (typeof button.addEventListener === 'function') {
-      button.addEventListener('click', (event) => {
-        if (event !== undefined && event !== null && typeof event.stopPropagation === 'function') event.stopPropagation()
-        // The click itself is the user's action: mark it before either branch so
-        // the pass that answers it runs even though the pointer is inside the
-        // tree (onUserAction, spec §7).
-        if (typeof data.onUserAction === 'function') data.onUserAction()
-        // One bar drives both truncation systems (issue 4): while the host
-        // truncates, the bar only proxies the host's own expand/collapse —
-        // the host's aria-expanded state is then the single reveal truth.
-        // Without a host control the bar toggles this section's block itself.
-        const host = bar.parentNode === null || bar.parentNode === undefined
-          ? null
-          : overflowButton(bar.parentNode)
-        if (host !== null) {
-          if (typeof host.click === 'function') host.click()
-        } else {
-          data.onToggleReveal(key)
-        }
-      })
-    }
-    bar.appendChild(button)
-    data.foldRows.add(bar)
-  }
-  bar.dataset.dshUxPlusKey = key
-  if (bar.parentNode !== section) section.appendChild(bar)
-  data.styles.write(bar, 'order', order)
-  const button = bar.children[0]
-  if (button !== undefined && button !== null) {
-    const label = button.children[1]
-    if (label !== undefined && label !== null) label.textContent = text
-    if (typeof button.setAttribute === 'function') {
-      button.setAttribute('aria-expanded', expanded === true ? 'true' : 'false')
-      button.setAttribute('title', text)
-    }
-  }
-  return bar
-}
-
-/** Take the fold row back out of the section (nothing left to fold). */
-function removeFoldRow(section, data) {
-  const row = findFoldRow(section)
-  if (row === null) return
-  data.styles.restore(row, 'order')
-  detach(row, data.foldRows)
-}
-
-/**
- * The count the host's own overflow button reports as hidden, parsed from its
- * label ("展开其余 1 个会话" / "Expand 1 more session"). 0 while the button
- * is absent or already expanded (its label then reads "收起" with no number).
- */
-function hostHiddenCount(button) {
-  if (button === null) return 0
-  if (button.getAttribute('aria-expanded') === 'true') return 0
-  const match = String(button.textContent === undefined ? '' : button.textContent).match(/\d+/)
-  return match === null ? 0 : Number(match[0])
-}
-
-/**
- * Collapse the section's dormant block behind the thin bar (spec §4).
- *
- * Every dormant row is hidden by default — the whole zone, not a surplus above
- * a visible quota — while staying in the DOM: only `display` is written, so the
- * replay count and the row↔session pairing keep matching. Archived rows keep
- * today's treatment (they never fold), and neither does a leading row: the
- * current blank and the user's pins are Active for that reason alone.
- *
- * Reveal truth (issue 4): while the host truncates, the reveal FOLLOWS the
- * host's own aria-expanded — one control, one state, so the host's 收起 folds
- * everything back together and no revealed row is ever stranded. Without a
- * host control the bar toggles this section's revealed Set (page load only:
- * folding is a presentation decision, never persisted state) and stays on
- * screen as the collapse control.
- *
- * While the bar shows, the host's collapsed overflow button is hidden and
- * absorbed into it: its hidden count joins the bar's label and the bar's click
- * proxies the host's expand, so the section carries exactly one truncation row.
- * An expanded host button ("收起") stays visible — it is a collapse control,
- * not a competing truncation row.
- */
-function applyFold(section, account, ordered, data) {
-  const dormant = []
-  for (const entry of ordered) {
-    if (entry.zone !== 'dormant') continue
-    if (data.archived.has(entry.session.id)) continue
-    dormant.push(entry)
-  }
-  const host = overflowButton(section)
-  const revealed = host !== null
-    ? host.getAttribute('aria-expanded') === 'true'
-    : data.revealed.has(account.key)
-  const hidden = revealed ? [] : dormant
-  const hiddenElements = new Set()
-  for (const entry of hidden) hiddenElements.add(entry.element)
-  for (const entry of ordered) {
-    if (hiddenElements.has(entry.element)) data.styles.write(entry.element, 'display', 'none')
-    else data.styles.restore(entry.element, 'display')
-  }
-  const hostHidden = hostHiddenCount(host)
-  // The bar takes the rank slot between the two blocks (orderRows numbers the
-  // dormant rows one rank higher for exactly that gap).
-  const activeCount = ordered.reduce((total, entry) => (entry.zone === 'active' ? total + 1 : total), 0)
-  const barRank = String(10 + activeCount)
-  if (hidden.length === 0 && hostHidden === 0) {
-    if (revealed && host === null) {
-      // Nothing left to hide, but the user can still fold the block back.
-      ensureFoldBar(section, data, account.key, foldBarCollapseText(data.locale), true, barRank)
-      return
-    }
-    removeFoldRow(section, data)
-    if (host !== null) data.styles.restore(host, 'display')
-    return
-  }
-  if (host !== null && host.getAttribute('aria-expanded') === 'false') data.styles.write(host, 'display', 'none')
-  else if (host !== null) data.styles.restore(host, 'display')
-  ensureFoldBar(section, data, account.key, foldBarText(data.locale, hidden.length + hostHidden), revealed, barRank)
 }
 
 /**
@@ -1612,20 +1418,20 @@ function hasPresentation(section) {
 
 /**
  * Fallback absorption (issue 3): when the row layer bails on count or pairing
- * drift, the section must STILL carry exactly one truncation row. The host
- * button's own label is host truth and needs no row pairing, so the bar still
- * absorbs it; anything this feature hid on an earlier successful pass is put
- * back, and the band (which would strand at stale geometry) is taken out.
+ * drift, nothing may stay hidden or lie about zones. Anything this feature hid
+ * on an earlier successful pass is put back and the band (which would strand
+ * at stale geometry) is taken out; the host's own button needs no rescue — it
+ * is host truth and stays where the host put it.
  *
  * A bail is 'unknown', not 'wrong' (the reported '怎么突然不生效了 / 绿色的效果
  * 没了'): these passes are scheduled by the HOST's own mutations, so one can
  * legitimately run in the instant between the host committing new rows and the
  * store publishing them — our exempt model and its slice then disagree by a row
  * or two. Stepping aside at that instant is what the user reads as the green
- * disappearing, so the section keeps its last consistent presentation (band,
- * fold and ranks together, so nothing lies) for a few passes; only a divergence
- * that persists — a shape this feature genuinely cannot model — falls through to
- * the step-aside below.
+ * disappearing, so the section keeps its last consistent presentation (band and
+ * ranks together, so nothing lies) for a few passes; only a divergence that
+ * persists — a shape this feature genuinely cannot model — falls through to the
+ * step-aside below.
  */
 function absorbHostTruncation(section, account, data) {
   if (data.statusMap === null) return
@@ -1640,15 +1446,6 @@ function absorbHostTruncation(section, account, data) {
     releaseBandContext(section, data)
     detach(band, data.bands)
   }
-  const host = overflowButton(section)
-  const hostHidden = hostHiddenCount(host)
-  if (hostHidden === 0) {
-    if (host !== null) data.styles.restore(host, 'display')
-    removeFoldRow(section, data)
-    return
-  }
-  data.styles.write(host, 'display', 'none')
-  ensureFoldBar(section, data, account.key, foldBarText(data.locale, hostHidden), false, FOLD_ROW_ORDER)
 }
 
 /** This feature's attention badge among a row's children, or null. */
@@ -1669,12 +1466,12 @@ function findBadge(row) {
  * attention it has already outlived. And only what is NOT visible is counted:
  * a collapsed workspace renders no rows at all (every Active-zone attention
  * member is hidden); an expanded workspace whose host overflow button is
- * present renders only its quota (the Active-zone attention members outside
+ * present renders only its watermark (the Active-zone attention members outside
  * the replayed slice are hidden); an expanded workspace with no overflow
  * button shows everything, so attention needs no badge.
  *
  * Counts come from the data layer × the status map, never from counting DOM
- * rows — the host does not render collapsed rows beyond its quota, so a DOM
+ * rows — the host does not render collapsed rows beyond its watermark, so a DOM
  * count would undercount exactly when the badge matters.
  */
 function hiddenAttention(section, account, data, view) {
@@ -1931,13 +1728,14 @@ function childrenOf(workspace, data) {
  * logged once per distinct reason (`traceSkip`) — silently doing nothing is
  * what let a drifted host replay pass unnoticed in production.
  *
- * The collapse replay is part of that contract: the rendered slice exempts
- * blank, running and running-subagent rows from the idle quota (rowExempt)
- * and uses the group's live quota derived from the DOM (collapsedShown). A
- * blank-only fixed-5 port matched only idle sections; on a section with a
- * running session it replayed one row short, tripped the count gate and left
- * the whole row layer off — the running conversation stayed below a stale
- * one, which is precisely what this feature exists to prevent.
+ * The collapse replay is part of that contract: the rendered slice is the
+ * host's watermark (blank rows always render, the first `watermark` non-blank
+ * rows survive) with the live watermark derived from the DOM (collapsedShown).
+ * The pre-0.2.1 model (running rows exempt, quota a multiple of 5) matched
+ * only idle sections; on a section with a running session it replayed one row
+ * short, tripped the count gate and left the whole row layer off — the
+ * running conversation stayed below a stale one, which is precisely what this
+ * feature exists to prevent.
  *
  * Two row classes keep the host's rendered positions instead of being
  * re-ranked: the current blank row (host pinCurrentBlank invariant,
@@ -2008,12 +1806,15 @@ function orderRows(section, account, data, view) {
     ? compareRecency
     : (a, b) => (a.zone === b.zone ? 0 : a.zone === 'active' ? -1 : 1) || compareRecency(a, b))
   const ordered = leading.concat(ranked)
-  // Ranks leave one slot for the dormant bar between the two blocks (spec §4):
-  // the bar sits at exactly that rank, so the dormant block renders below it.
+  // Ranks leave one slot for the host's own overflow button directly below the
+  // Active block (user rule): the button sits at exactly that rank, so the
+  // dormant rows render below it however many rows the Active block holds.
+  // An all-dormant section has no Active block — no slot, the button keeps the
+  // host's native last place.
   const activeCount = ordered.reduce((total, entry) => (entry.zone === 'active' ? total + 1 : total), 0)
-  const barRank = data.statusMap === null ? -1 : activeCount
+  const buttonRank = data.statusMap === null || activeCount === 0 ? -1 : activeCount
   ordered.forEach((entry, index) => {
-    const rank = barRank >= 0 && index >= barRank ? index + 1 : index
+    const rank = buttonRank >= 0 && index >= buttonRank ? index + 1 : index
     data.styles.write(entry.element, 'order', String(10 + rank))
     data.styles.write(entry.element, 'flexShrink', '0')
     const row = rowElementOf(entry)
@@ -2031,11 +1832,39 @@ function orderRows(section, account, data, view) {
     ensureStatusDot(row,
       archived ? 'none' : statusOf(data.statusMap.get(entry.session.id)), data.locale, data)
   })
-  // The overflow button stays last no matter what.
+  // Fold (user rule): where the section has an Active block AND the host's
+  // own expand button AND the user has not opened it, the dormant rows are
+  // hidden ENTIRELY — the host's watermark renders a few of them (its rows
+  // are not our Active block) and showing one below the pin was the reported
+  // leak. The host button is the one expand control: its click reveals the
+  // section (markUserActionOn), and the answering pass then keeps every row
+  // the host renders visible — no bounce; its 收起 click closes the section
+  // again. Without a host button there is nothing to reuse: nothing hides,
+  // because nothing would bring the rows back.
   const button = overflowButton(section)
-  if (button !== null) data.styles.write(button, 'order', '999')
+  const fold = data.statusMap !== null
+    && buttonRank >= 0 && button !== null && !data.revealed.has(account.key)
+  // The host's own overflow button: while the section is FOLDED it is pinned
+  // directly below the Active block (its slot was reserved above); once the
+  // section is open it goes back to the host's native place — the very
+  // bottom, below every session — exactly like the host's own expand (user
+  // rule). Its click reveals or re-folds the section and marks a user action
+  // (markUserActionOn), so the answering pass pierces the anti-churn pause
+  // and waits the host's row glide out.
+  if (button !== null) {
+    data.styles.write(button, 'order', fold ? String(10 + buttonRank) : '999')
+    if (typeof data.markUserActionOn === 'function') data.markUserActionOn(button, account.key)
+  }
   if (data.statusMap !== null) {
-    applyFold(section, account, ordered, data)
+    for (const entry of ordered) {
+      if (fold && entry.zone === 'dormant' && !data.archived.has(entry.session.id)) {
+        data.styles.write(entry.element, 'display', 'none')
+      } else {
+        data.styles.restore(entry.element, 'display')
+      }
+    }
+  }
+  if (data.statusMap !== null) {
     ensureZoneBand(section, ordered, data)
     // This pass explained the section, so any drift grace it was spending is
     // over: the next unexplained pass starts the count from scratch.
@@ -2132,7 +1961,7 @@ function orderLevel(container, workspaces, topLevel, data, view) {
     // Liveness boost (spec §6): a group holding a session that needs the user
     // right now (running, or blocked on a reply) is "active now" no matter
     // when it last changed. Only with a status map — and unread completions do
-    // NOT lift a group: those are attention, not activity, and the fold above
+    // NOT lift a group: those are attention, not activity, and the split above
     // tells them apart. The boost is a floor of `now`, never a new maximum, so
     // a group cannot claim to be fresher than a session updated in the future.
     let activity = base
@@ -2203,10 +2032,9 @@ export function client(ctx, deps) {
   /** Workspace ids already auto-collapsed during this page load. */
   const collapsedOnce = new Set()
   // ---- zone layer state (all of it inert without a status map) ------------
-  /** Account keys whose dormant block the user revealed (page load only, §4). */
+  /** Account keys whose dormant block the user expanded this page load (§4). */
   const revealed = new Set()
-  /** Our injected dormant bars / attention badges / status dots, for dispose. */
-  const foldRows = new Set()
+  /** Our injected attention badges / status dots, for dispose. */
   const badges = new Set()
   const dots = new Set()
   /** The per-section Active band elements (one per section, §2). */
@@ -2242,9 +2070,10 @@ export function client(ctx, deps) {
 
   /**
    * True once the pass that ANSWERS the user action has run. Only that first pass
-   * skips the FLIP: a reveal lands on rows that were `display:none` (their rect is
-   * all zeros, so animating them means flying in from the page corner), while an
-   * ambient move that merely happens inside the same window still animates.
+   * skips the FLIP: the host has just entered or moved rows under its own
+   * WAAPI glide (an inline transform would fight it — see HOST_GLIDE_MS),
+   * while an ambient move that merely happens inside the same window still
+   * animates.
    */
   let userActedHandled = true
 
@@ -2308,23 +2137,44 @@ export function client(ctx, deps) {
     }
   }
 
-  /** Toggle a section's folded tail for this page load (spec §4, issue 4). */
-  function onToggleReveal(accountKey) {
-    if (revealed.has(accountKey)) revealed.delete(accountKey)
-    else revealed.add(accountKey)
-    schedule()
+  /**
+   * Mark the host's own overflow button once (WeakSet: the host remounts it on
+   * every watermark change, each fresh element gets its one listener). Its
+   * click is the section's ONE expand control and it toggles: the host labels
+   * the button 收起 exactly while `aria-expanded` is true (nothing hidden),
+   * so a click read at that attribute's face value either opens the section
+   * (revealed.add — the answering pass must never fold freshly expanded rows
+   * straight back, the reported bounce) or closes it again (revealed.delete —
+   * the next pass re-folds the dormant block, the user's 收起). Either way it
+   * marks a user action, so the answering pass pierces the anti-churn freeze
+   * and waits the host's row glide out.
+   */
+  const actionMarked = new WeakSet()
+  function markUserActionOn(element, accountKey) {
+    if (typeof element.addEventListener !== 'function') return
+    if (actionMarked.has(element)) return
+    actionMarked.add(element)
+    element.addEventListener('click', () => {
+      if (disposed) return
+      const collapsing = typeof element.getAttribute === 'function'
+        && element.getAttribute('aria-expanded') === 'true'
+      if (collapsing) revealed.delete(accountKey)
+      else revealed.add(accountKey)
+      onUserAction()
+    })
   }
 
   /**
-   * Note that the user just pressed the fold bar (spec §7). A real click ALWAYS
-   * arrives with the pointer already inside the tree — pointerover fires first —
-   * so without this the churn freeze deferred the very pass that answers the
-   * click, and the bar read as dead until the pointer happened to leave the
-   * sidebar (reported live as 【N 条历史会话】打不开). The freeze protects the
-   * cursor from AMBIENT churn, never from a click the user just made: passes are
-   * let through for USER_ACTION_MS (no FLIP — the state the user asked for should
-   * simply be there), and one bounded retry is armed so our layer converges on a
-   * proxied host control even when its state change sends no store signal at all.
+   * Note that the user just pressed the host's overflow button (spec §7). A
+   * real click ALWAYS arrives with the pointer already inside the tree —
+   * pointerover fires first — so without this the churn freeze deferred the
+   * very pass that answers the click, and the list read as dead until the
+   * pointer happened to leave the sidebar (reported live as 【N 条历史会话】
+   * 打不开). The freeze protects the cursor from AMBIENT churn, never from a
+   * click the user just made: passes are let through for USER_ACTION_MS (no
+   * FLIP — the state the user asked for should simply be there), and one
+   * bounded retry is armed so our layer converges on the host control even
+   * when its state change sends no store signal at all.
    * @returns {void}
    */
   function onUserAction() {
@@ -2366,20 +2216,18 @@ export function client(ctx, deps) {
       // Subagent catalogs: the host's running-subagent exemption reads them
       // through the same list snapshot (tree.ts:390-395), so the row replay
       // can mirror it without a statuses service.
-      projectionsBySession: sessionSnapshot.projectionsBySession,
       // Liveness layer (spec §1-§8). `statusMap === null` turns the whole layer
       // off, which is how the pre-liveness behavior stays testable.
       statusMap: readStatusMap(),
       now: Date.now(),
       locale: activeLocale(),
       revealed,
-      foldRows,
       badges,
       dots,
       bands,
       zoneMarked,
       driftPasses,
-      onToggleReveal,
+      markUserActionOn,
       onUserAction,
       styles,
     }
@@ -2600,12 +2448,17 @@ export function client(ctx, deps) {
 
   function schedule() {
     if (disposed || timer !== null) return
+    // The pass that answers the user's own click waits the host's row glide
+    // out (HOST_GLIDE_MS): the reveal itself is already on screen (the host
+    // rendered it), only the dressing lands after the rows settle. Every
+    // other pass stays immediate.
+    const answeringNow = Date.now() < userActedUntil && !userActedHandled
     timer = window.setTimeout(function () {
       timer = null
       if (disposed) return
       // A 分组方式 / 排序方式 / 筛选会话 click is the user asking for a different
-      // list, and a click on the fold bar is the user asking for one block to
-      // open or close. The freeze protects the cursor from AMBIENT churn, never
+      // list, and a click on the host's overflow button is the user asking for
+      // more rows. The freeze protects the cursor from AMBIENT churn, never
       // from the user's own action, so those passes pierce it (and skip the
       // FLIP: the state they asked for should simply be there).
       const signature = viewSignature()
@@ -2613,7 +2466,8 @@ export function client(ctx, deps) {
       lastViewSignature = signature
       // USER_ACTION_MS lets every pass through the freeze, so a proxied host
       // control converges on the pass its own re-render schedules; only the first
-      // one is the pass that answers the click.
+      // one is the pass that answers the click — schedule() landed it past the
+      // host's row glide, so every later pass already animates on settled rows.
       const acting = Date.now() < userActedUntil
       const answering = acting && !userActedHandled
       // The freeze is a courtesy with a lifetime: once both retries are spent the
@@ -2640,10 +2494,13 @@ export function client(ctx, deps) {
       if (!frozenNow) retrySteps = 0
       // A forced pass never FLIPs: it lands on rows the host has already moved,
       // and animating them under a resting cursor is the churn the freeze exists
-      // to prevent.
+      // to prevent. The answering pass is forced twice over — schedule() waited
+      // the host's WAAPI glide out (an inline FLIP transform fighting that glide
+      // lands in one snap when the glide finishes: the reported post-click
+      // flicker), and the state the user clicked for should simply be there.
       reorder(switched || answering || spent)
       idlePass()
-    }, 0)
+    }, answeringNow ? HOST_GLIDE_MS : 0)
   }
 
   /**
@@ -2715,12 +2572,9 @@ export function client(ctx, deps) {
     for (const row of document.querySelectorAll(`[data-row-key^="${ROW_PREFIX}"]`)) removeAgeLabel(row)
     // Liveness artifacts, in the reverse order they were created: any in-flight
     // FLIP transform first (a disposed feature leaves no translate behind),
-    // then every row it hid, then the fold rows and badges themselves.
+    // then every row it hid, then the badges themselves.
     for (const element of flips) clearFlip(element)
     flips.clear()
-    for (const section of document.querySelectorAll(`[data-row-key^="${ROW_PREFIX}"]`)) removeFoldRow(section, { styles, foldRows })
-    for (const row of foldRows) detach(row)
-    foldRows.clear()
     for (const badge of badges) detach(badge)
     badges.clear()
     for (const dot of dots) detach(dot)

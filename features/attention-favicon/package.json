@@ -1,0 +1,12 @@
+{
+  "name": "@dsh-ux-plus/attention-favicon",
+  "version": "0.4.0",
+  "private": true,
+  "description": "Whale favicon that breathes while every session computes and fast-blinks a green/orange dot when a run finished or needs a click. (private sub-package of dsh-ux-plus: inlined into the package build, never published or installed as a row of its own.)",
+  "type": "module",
+  "main": "src/index.js",
+  "exports": {
+    ".": "./src/index.js",
+    "./package.json": "./package.json"
+  }
+}

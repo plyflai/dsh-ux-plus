@@ -1,7 +1,7 @@
 /**
  * P3 switch-engine tests (plain Node, no browser, no React):
  *
- *   - the `ux-plus` switch keys are exactly the five frozen feature ids;
+ *   - the `ux-plus` switch keys are exactly the six frozen feature ids;
  *   - every source file of the package imports only the nine shell seeds or
  *     relative paths (client-half seed discipline, source level — the built
  *     artifact is asserted mechanically by scripts/build.js, R10);
@@ -19,7 +19,7 @@ import { test } from 'node:test'
 const root = new URL('..', import.meta.url)
 
 /** Frozen feature ids (plan v2.5 naming freeze). */
-const FROZEN = ['conversation-typography', 'workspace-session-menu', 'workspace-recency-order', 'tool-ask-question-expanded', 'workspace-session-inherit']
+const FROZEN = ['conversation-typography', 'workspace-session-menu', 'workspace-recency-order', 'tool-ask-question-expanded', 'workspace-session-inherit', 'attention-favicon']
 
 /** The nine shell-seeded module-table specifiers (host platform.ts:8-14). */
 const SEEDS = [

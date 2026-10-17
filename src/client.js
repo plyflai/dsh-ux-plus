@@ -191,7 +191,10 @@ export function apply(ctx) {
   // the session/workspace services are read via ctx.get — safe at apply time
   // because they are declared in `inject` above (activation waits for the
   // providers); if a surface ever lacks one, the dependent feature degrades
-  // to a no-op instead of failing the tab.
+  // to a no-op instead of failing the tab. These are SERVICE faces, not
+  // stores — `sessions.list` / `workspaces.list` hold the subscribable
+  // observables (2026-10-17: attention-favicon subscribed to the service
+  // itself and its apply-time TypeError failed the plugin's whole fiber).
   const deps = {
     react: React,
     primitives: { MenuItemButton, IconCopyOutlineRegular, IconRightUpOutlineRegular },
