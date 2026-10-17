@@ -115,9 +115,9 @@ npm run build   # tsdown emits lib/client.js (classic script, committed to the r
 
 The three most recent entries; full history in [CHANGELOG.md](CHANGELOG.md).
 
+- **v0.4.2 · 2026-10-17** — Docs: the recency screenshots now render in the host's dark theme (white labels). No behaviour change.
 - **v0.4.1 · 2026-10-17** — Docs: the README rewritten lean, the tab favicon called out at the top, and fresh Active-block screenshots (folded / expanded). No behaviour change.
 - **v0.4.0 · 2026-10-17** — New feature **Attention favicon**: the tab's whale breathes while anything computes, turns green for finished-and-unread, and blinks an orange dot while something awaits your click — composable, background-tab safe, both themes kept. The sidebar's own fold bar is retired: the host's 【Expand N more sessions】 is now the single expand/collapse control — history fully hidden below the Active block, button pinned below the block while folded and back at the list's bottom once open. Fixed: the flicker after expanding — the answering pass now waits the host's 200 ms row glide out.
-- **v0.3.2 · 2026-10-16** — Fixed: the Active block's green could vanish mid-session. A section now holds its last consistent look through a host render race, and the anti-churn pause has a lifetime — a deferred pass always runs eventually.
 
 ## License
 
