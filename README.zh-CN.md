@@ -1,4 +1,4 @@
-# <img src="docs/images/icon.svg" width="30" height="30" alt="" align="top"> dsh-ux-plus
+# <img src="docs/images/icon.svg" width="44" height="44" alt="" align="top"> dsh-ux-plus
 
 给 DSH Web 对话界面收纳的各种界面小改进。每项功能都有独立开关，位于 **设置 → UX Plus**，切换即时生效。
 
@@ -115,8 +115,8 @@ npm run build   # tsdown 产出 lib/client.js（经典脚本，随仓库提交�
 
 最近三条；完整历史见 [CHANGELOG.md](CHANGELOG.md)。
 
+- **v0.4.4 · 2026-10-18** — 图标微调：白边改绕整个圆角外形（不再勾 UX+ 字母），README 内联图标加大到 44px。功能无变化。
 - **v0.4.3 · 2026-10-18** — 项目图标：宿主白鲸 + 斜体 UX+ 标记，以 `docs/images/icon.svg` / `icon-512.png` 入库，README 标题前内联展示。功能无变化。
-- **v0.4.2 · 2026-10-17** — 文档：Active 块截图改为宿主暗色主题渲染（标题白字）。功能无变化。
 
 ## License
 

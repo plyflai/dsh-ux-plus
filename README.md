@@ -1,4 +1,4 @@
-# <img src="docs/images/icon.svg" width="30" height="30" alt="" align="top"> dsh-ux-plus
+# <img src="docs/images/icon.svg" width="44" height="44" alt="" align="top"> dsh-ux-plus
 
 Small interface improvements for the DSH Web chat. Each feature has its own switch under **Settings → UX Plus** and applies instantly.
 
@@ -115,8 +115,8 @@ npm run build   # tsdown emits lib/client.js (classic script, committed to the r
 
 The three most recent entries; full history in [CHANGELOG.md](CHANGELOG.md).
 
+- **v0.4.4 · 2026-10-18** — Icon polish: the white edge now frames the whole tile instead of outlining the UX+ letters; the inline README icon grows to 44px. No behaviour change.
 - **v0.4.3 · 2026-10-18** — The project icon: the host's whale with an italic UX+ mark, inline before the README title and shipped as `docs/images/icon.svg` / `icon-512.png`. No behaviour change.
-- **v0.4.2 · 2026-10-17** — Docs: the recency screenshots now render in the host's dark theme (white labels). No behaviour change.
 
 ## License
 
