@@ -142,6 +142,7 @@ npm run build   # tsdown emits lib/client.js (classic script, committed to the r
 
 The three most recent entries; full history in [CHANGELOG.md](CHANGELOG.md).
 
+- **v0.5.3 · 2026-10-19** — Quick-search style isolation: every rule for the box and its popups is scoped to this evaluation's own token, so a superseded bundle's stylesheet cannot restyle the box even when it is inserted later with equal specificity — verified by appending the 0.5.1 sheet last, gutters stayed 13px / 13px.
 - **v0.5.2 · 2026-10-19** — Two quick-search fixes: the box now has strictly symmetric gutters (both ends are a 22px slot inside 8px padding, so the magnifier no longer sits closer to the edge than the right-hand icons), and a box left behind by a hot-replaced bundle instance no longer stacks under the new one — our nodes carry a per-evaluation token, so a stale marker is hidden instead of fought over.
 - **v0.5.1 · 2026-10-19** — Quick search polish: the model picker is now a small chip icon that opens a menu (a dot marks a non-default pick), the box contents are properly centred, and the box no longer needs `remote.$host.home` at mount — Enter searches as soon as the connection is ready.
 - **v0.5.0 · 2026-10-19** — New "Workspace quick search": a persistent sidebar box opens an ordinary session on Enter (with a minimal model picker). Those sessions are filed into the hidden workspace `.dsh-ux-plus/search`, and the clock icon reopens the last 50 searches.

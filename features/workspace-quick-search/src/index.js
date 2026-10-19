@@ -357,12 +357,14 @@ const MODEL_PATHS = [
 
 /** Stylesheet for the box and its popup (authored text: no hashed class names). */
 function boxCss() {
-  const scope = `[data-dsh-ux-plus="${ROOT_VALUE}"]`
-  const menu = `[data-dsh-ux-plus="${MENU_VALUE}"]`
+  // Every rule we own is scoped to an instance token, so a superseded bundle's
+  // stylesheet (same specificity, possibly added later) can never restyle our node.
+  const scope = `[data-dsh-ux-plus="${ROOT_VALUE}"][data-ux-plus-instance]`
+  const menu = `[data-dsh-ux-plus="${MENU_VALUE}"][data-ux-plus-instance]`
   return [
     `${scope} { display: flex; flex-direction: column; gap: 3px; box-sizing: border-box; width: 100%; padding: 6px 8px; }`,
     // A superseded bundle instance leaves a marker-only node behind; hide it instead of stacking two boxes.
-    `${scope}:not([data-ux-plus-instance]), ${menu}:not([data-ux-plus-instance]) { display: none !important; }`,
+    `[data-dsh-ux-plus="${ROOT_VALUE}"]:not([data-ux-plus-instance]), [data-dsh-ux-plus="${MENU_VALUE}"]:not([data-ux-plus-instance]) { display: none !important; }`,
     `${scope} [data-qs="field"] { display: flex; align-items: center; justify-content: flex-start; gap: 6px; box-sizing: border-box;`
       // Symmetric gutters: both ends carry an equal 22px slot inside equal padding.
       + ' height: 30px; padding: 0 8px; line-height: 1;'

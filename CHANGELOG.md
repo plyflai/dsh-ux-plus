@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.5.3 — 2026-10-19
+
+- 快速搜索的样式规则按实例 token 收窄：`boxCss()` 的 `scope` / `menu` 选择器由 `[data-dsh-ux-plus="…"]` 改成 `[data-dsh-ux-plus="…"][data-ux-plus-instance]`，旧 bundle 的样式表即使更晚插入、与我们的规则同权重，也无法再改到新框的内边距与图标槽（此前只有前端节点带 token，样式仍是裸属性选择器）。
+- 隐藏旧框的那条规则保持裸选择器 `:not([data-ux-plus-instance])`，并补注释说明为什么只有它不收紧：它必须能匹配到没有我们 token 的残留节点。
+- 验证：无头 Chrome 里故意把 0.5.1 的样式表追加在末尾，量到 `paddingLeft: 8px`、左右 gutter 13px / 13px；测试新增一条断言「我们的几何规则带实例 token」。
+
 ## 0.5.2 — 2026-10-19
 
 - 左右 gutter 对称：`[data-qs="field"]` 的内边距由 `0 4px 0 8px` 改成 `0 8px`，放大镜的槽由 16px 改成 22px —— 与右侧模型/历史图标同为 22px 槽、同为 8px 内边距，两端视觉留白一致。

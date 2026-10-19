@@ -407,6 +407,7 @@ test('mount inserts the box as the region first child and dispose removes every 
     const slotWidth = (sel) => (/width: (\d+)px/.exec(rule(sel)) || [])[1]
     assert.equal(slotWidth('[data-qs="glass"]'), slotWidth('[data-qs="history"]'), 'left icon and right icon share one slot width')
     assert.equal(slotWidth('[data-qs="glass"]'), slotWidth('[data-qs="model"]'), 'left slot matches the model slot too')
+    assert.ok(fieldCss.includes('[data-ux-plus-instance]'), 'our geometry rules are instance-scoped, so a stale sheet cannot restyle them')
     assert.equal(sessions.subscribeCount(), 1)
     assert.equal(workspaces.subscribeCount(), 1)
     assert.equal(env.observers.length, 1)
