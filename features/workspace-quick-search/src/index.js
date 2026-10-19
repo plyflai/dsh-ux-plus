@@ -120,6 +120,16 @@ export const HISTORY_LIMIT = 50
 const ROOT_VALUE = 'quick-search'
 /** Root marker of the popup panels (a body child: the sidebar clips overflow). */
 const MENU_VALUE = 'quick-search-history'
+/**
+ * Per-evaluation token stamped on our own nodes.
+ *
+ * A client bundle can be replaced under a live page (the module service serves a
+ * new revision on reconnect), and the superseded instance may leave its box in
+ * the DOM. The sheet hides every node that carries a marker but no token, so a
+ * stale copy disappears instead of stacking a second box. Hiding — not removing —
+ * keeps us from fighting a still-running old instance that would re-insert it.
+ */
+const INSTANCE_TOKEN = `${ROOT_VALUE}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
 /** Host row-key prefixes (ui-workspace `Rows.tsx:245,590`). */
 const WORKSPACE_ROW_PREFIX = 'workspace:'
 const SESSION_ROW_PREFIX = 'session:'
@@ -351,14 +361,17 @@ function boxCss() {
   const menu = `[data-dsh-ux-plus="${MENU_VALUE}"]`
   return [
     `${scope} { display: flex; flex-direction: column; gap: 3px; box-sizing: border-box; width: 100%; padding: 6px 8px; }`,
+    // A superseded bundle instance leaves a marker-only node behind; hide it instead of stacking two boxes.
+    `${scope}:not([data-ux-plus-instance]), ${menu}:not([data-ux-plus-instance]) { display: none !important; }`,
     `${scope} [data-qs="field"] { display: flex; align-items: center; justify-content: flex-start; gap: 6px; box-sizing: border-box;`
-      + ' height: 30px; padding: 0 4px 0 8px; line-height: 1;'
+      // Symmetric gutters: both ends carry an equal 22px slot inside equal padding.
+      + ' height: 30px; padding: 0 8px; line-height: 1;'
       + ' border-radius: 8px; border: 1px solid transparent;'
       + ' background: var(--dsw-alias-bg-layer-2, rgba(128, 128, 128, 0.10));'
       + ' transition: border-color 120ms ease; }',
     `${scope} [data-qs="field"]:focus-within { border-color: var(--dsw-alias-border-strong, #3a3f4b); }`,
     `${scope} [data-qs="glass"] { display: inline-flex; flex: 0 0 auto; align-items: center; justify-content: center;`
-      + ' width: 16px; height: 16px; line-height: 0; color: var(--dsw-alias-label-secondary, #9aa0ab); }',
+      + ' width: 22px; height: 22px; line-height: 0; color: var(--dsw-alias-label-secondary, #9aa0ab); }',
     // Every icon is a block so it centres by geometry, not by text baseline.
     `${scope} [data-qs] svg { display: block; }`,
     `${scope} [data-qs="input"] { flex: 1 1 auto; align-self: stretch; min-width: 0; height: auto; margin: 0; padding: 0;`
@@ -573,7 +586,7 @@ export function client(ctx, deps) {
 
   /** Build the box once; every later render only touches its children. */
   function buildNode() {
-    const root = el('div', { 'data-dsh-ux-plus': ROOT_VALUE })
+    const root = el('div', { 'data-dsh-ux-plus': ROOT_VALUE, 'data-ux-plus-instance': INSTANCE_TOKEN })
     const field = el('div', { 'data-qs': 'field' })
     const glass = el('span', { 'data-qs': 'glass' })
     glass.appendChild(svgIcon(document, MAGNIFIER_PATHS, 14))
@@ -896,7 +909,7 @@ export function client(ctx, deps) {
       return
     }
     pruneHistory()
-    const node = el('div', { 'data-dsh-ux-plus': MENU_VALUE, role: 'dialog', 'aria-label': t('historyTitle') })
+    const node = el('div', { 'data-dsh-ux-plus': MENU_VALUE, 'data-ux-plus-instance': INSTANCE_TOKEN, role: 'dialog', 'aria-label': t('historyTitle') })
     const head = el('div', { 'data-qs': 'menu-head' })
     const label = document.createElement('span')
     label.textContent = t('historyTitle')
@@ -944,7 +957,7 @@ export function client(ctx, deps) {
       closePanel()
       return
     }
-    const node = el('div', { 'data-dsh-ux-plus': MENU_VALUE, role: 'dialog', 'aria-label': t('model') })
+    const node = el('div', { 'data-dsh-ux-plus': MENU_VALUE, 'data-ux-plus-instance': INSTANCE_TOKEN, role: 'dialog', 'aria-label': t('model') })
     const head = el('div', { 'data-qs': 'menu-head' })
     const label = document.createElement('span')
     label.textContent = t('model')

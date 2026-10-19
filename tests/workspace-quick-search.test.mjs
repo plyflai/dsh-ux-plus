@@ -386,11 +386,27 @@ test('mount inserts the box as the region first child and dispose removes every 
 
     assert.equal(region.children[0], rootNode, 'the box is the region first child')
     assert.equal(rootNode.getAttribute('data-dsh-ux-plus'), 'quick-search')
+    assert.ok(rootNode.getAttribute('data-ux-plus-instance'), 'our box carries the instance token')
     const input = pick(rootNode, 'data-qs', 'input')
     assert.ok(input, 'the field holds an input')
     assert.ok(input.getAttribute('placeholder').includes('搜索'), 'placeholder follows the active locale')
     assert.equal(env.document.head.children.length, 2, 'one sheet for the box, one for the hidden workspace')
     assert.ok(env.document.head.children[0].textContent.includes('[data-qs="field"]'))
+    const sheet = env.document.head.children[0].textContent
+    assert.ok(
+      sheet.includes('[data-ux-plus-instance]'),
+      'a marker-only box left by a superseded bundle is hidden, not stacked',
+    )
+    // Gutter symmetry: both ends of the row are an equal slot inside equal padding.
+    const rule = (sel) => {
+      const hit = sheet.split('}').find((part) => part.includes(sel))
+      return hit || ''
+    }
+    const fieldCss = rule('[data-qs="field"] {')
+    assert.ok(/padding: 0 8px/.test(fieldCss), 'the row insets both ends by the same amount')
+    const slotWidth = (sel) => (/width: (\d+)px/.exec(rule(sel)) || [])[1]
+    assert.equal(slotWidth('[data-qs="glass"]'), slotWidth('[data-qs="history"]'), 'left icon and right icon share one slot width')
+    assert.equal(slotWidth('[data-qs="glass"]'), slotWidth('[data-qs="model"]'), 'left slot matches the model slot too')
     assert.equal(sessions.subscribeCount(), 1)
     assert.equal(workspaces.subscribeCount(), 1)
     assert.equal(env.observers.length, 1)
