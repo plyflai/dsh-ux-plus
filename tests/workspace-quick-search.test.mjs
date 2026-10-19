@@ -408,6 +408,13 @@ test('mount inserts the box as the region first child and dispose removes every 
     assert.equal(slotWidth('[data-qs="glass"]'), slotWidth('[data-qs="history"]'), 'left icon and right icon share one slot width')
     assert.equal(slotWidth('[data-qs="glass"]'), slotWidth('[data-qs="model"]'), 'left slot matches the model slot too')
     assert.ok(fieldCss.includes('[data-ux-plus-instance]'), 'our geometry rules are instance-scoped, so a stale sheet cannot restyle them')
+    // The sidebar region is inset asymmetrically; the box must flush with the list band,
+    // so its left edge lines up with the rows and its right edge with the header controls.
+    const scopeCss = rule('[data-dsh-ux-plus="quick-search"][data-ux-plus-instance] {')
+    assert.ok(
+      /padding: 6px var\(--dsh-session-list-edge-inset, 12px\) 6px 0/.test(scopeCss),
+      'the box takes the host right inset and no left inset',
+    )
     assert.equal(sessions.subscribeCount(), 1)
     assert.equal(workspaces.subscribeCount(), 1)
     assert.equal(env.observers.length, 1)

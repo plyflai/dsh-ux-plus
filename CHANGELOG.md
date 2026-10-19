@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.5.4 — 2026-10-19
+
+- 外框不再左右各留 8px：`boxCss()` 里 `[data-dsh-ux-plus="quick-search"][data-ux-plus-instance]` 的 `padding` 由 `6px 8px` 改成 `6px var(--dsh-session-list-edge-inset, 12px) 6px 0`。宿主的 `.regionArea`（`margin-left:-4px / padding-left:4px / margin-right:-12px`）本来就是非对称的，搜索框作为它的第一个子元素，对称内边距只会让左边缘比会话行深 8px、右边缘比【工作区】控件横冲出去 4px —— 这就是「左侧多出一块空白」。
+- 框内几何不变：`[data-qs="field"]` 仍是 `padding: 0 8px`、三枚图标同为 22px 槽，两端视觉留白各 13px（含 1px 边框）。
+- 验证：用宿主真实 CSS 变量（`--dsh-sidebar-inline-padding:12px`、`--dsh-session-list-edge-inset`、`.regionArea`/`.browser`/`.list`/`.row` 的边距）搭了一个静态侧边栏，无头 Chrome 量到 fieldLeft−rowLeft = 0.0、fieldRight−headerPillRight = 0.0、左右 gutter 各 13.0px。
+- 测试：新增一条断言，要求外框的 `padding` 以宿主变量取右侧内边距、左侧为 0。
+
 ## 0.5.3 — 2026-10-19
 
 - 快速搜索的样式规则按实例 token 收窄：`boxCss()` 的 `scope` / `menu` 选择器由 `[data-dsh-ux-plus="…"]` 改成 `[data-dsh-ux-plus="…"][data-ux-plus-instance]`，旧 bundle 的样式表即使更晚插入、与我们的规则同权重，也无法再改到新框的内边距与图标槽（此前只有前端节点带 token，样式仍是裸属性选择器）。

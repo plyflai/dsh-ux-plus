@@ -362,7 +362,10 @@ function boxCss() {
   const scope = `[data-dsh-ux-plus="${ROOT_VALUE}"][data-ux-plus-instance]`
   const menu = `[data-dsh-ux-plus="${MENU_VALUE}"][data-ux-plus-instance]`
   return [
-    `${scope} { display: flex; flex-direction: column; gap: 3px; box-sizing: border-box; width: 100%; padding: 6px 8px; }`,
+    // The sidebar's region is inset asymmetrically (margin -4px left, -12px right);
+    // flush the box with the list band so its rounded rect lines up with the rows
+    // below instead of floating 8px in from the left with a wider right edge.
+    `${scope} { display: flex; flex-direction: column; gap: 3px; box-sizing: border-box; width: 100%; padding: 6px var(--dsh-session-list-edge-inset, 12px) 6px 0; }`,
     // A superseded bundle instance leaves a marker-only node behind; hide it instead of stacking two boxes.
     `[data-dsh-ux-plus="${ROOT_VALUE}"]:not([data-ux-plus-instance]), [data-dsh-ux-plus="${MENU_VALUE}"]:not([data-ux-plus-instance]) { display: none !important; }`,
     `${scope} [data-qs="field"] { display: flex; align-items: center; justify-content: flex-start; gap: 6px; box-sizing: border-box;`
