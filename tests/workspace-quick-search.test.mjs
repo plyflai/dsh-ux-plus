@@ -389,7 +389,8 @@ test('mount inserts the box as the region first child and dispose removes every 
     assert.ok(rootNode.getAttribute('data-ux-plus-instance'), 'our box carries the instance token')
     const input = pick(rootNode, 'data-qs', 'input')
     assert.ok(input, 'the field holds an input')
-    assert.ok(input.getAttribute('placeholder').includes('搜索'), 'placeholder follows the active locale')
+    assert.equal(input.getAttribute('placeholder'), '回车开启新会话', 'the hint is the bare sentence, no parentheses')
+    assert.equal(input.getAttribute('aria-label'), '回车开启新会话', 'the accessible name follows the same copy')
     assert.equal(env.document.head.children.length, 2, 'one sheet for the box, one for the hidden workspace')
     assert.ok(env.document.head.children[0].textContent.includes('[data-qs="field"]'))
     const sheet = env.document.head.children[0].textContent
@@ -415,6 +416,10 @@ test('mount inserts the box as the region first child and dispose removes every 
       /padding: 6px var\(--dsh-session-list-edge-inset, 12px\) 6px 0/.test(scopeCss),
       'the box takes the host right inset and no left inset',
     )
+    // The hint is a hint: italic and partly transparent so typed text reads as the content.
+    const hintCss = rule('[data-qs="input"]::placeholder')
+    assert.ok(/font-style: italic/.test(hintCss), 'the placeholder is italic')
+    assert.ok(/opacity: 0\.7/.test(hintCss), 'the placeholder is slightly transparent')
     assert.equal(sessions.subscribeCount(), 1)
     assert.equal(workspaces.subscribeCount(), 1)
     assert.equal(env.observers.length, 1)

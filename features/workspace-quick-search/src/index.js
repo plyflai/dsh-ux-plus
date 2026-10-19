@@ -68,7 +68,7 @@ const NS = 'ux-plus-quick-search'
 /** Every user-visible string, keyed so the active DSH locale picks the row. */
 const MESSAGES = {
   zh: {
-    placeholder: '搜索…（回车直接开新会话）',
+    placeholder: '回车开启新会话',
     model: '模型',
     modelsEmpty: '还没有可用的模型',
     history: '搜索历史',
@@ -87,7 +87,7 @@ const MESSAGES = {
     days: '{n} 天前',
   },
   en: {
-    placeholder: 'Search… (Enter opens a new session)',
+    placeholder: 'Press Enter to start a new session',
     model: 'Model',
     modelsEmpty: 'No models available yet',
     history: 'Search history',
@@ -382,7 +382,8 @@ function boxCss() {
     `${scope} [data-qs="input"] { flex: 1 1 auto; align-self: stretch; min-width: 0; height: auto; margin: 0; padding: 0;`
       + ' box-sizing: border-box; border: none; outline: none; background: transparent; line-height: 1.25;'
       + ' color: var(--dsw-alias-label-primary, #e8e8e8); font: inherit; font-size: 13px; }',
-    `${scope} [data-qs="input"]::placeholder { color: var(--dsw-alias-label-secondary, #9aa0ab); }`,
+    // A hint, not a label: italic and slightly transparent so it recedes behind typed text.
+    `${scope} [data-qs="input"]::placeholder { color: var(--dsw-alias-label-secondary, #9aa0ab); font-style: italic; opacity: 0.7; }`,
     `${scope} [data-qs="model"] { flex: 0 0 auto; position: relative; display: inline-flex; align-items: center;`
       + ' justify-content: center; width: 22px; height: 22px; padding: 0; line-height: 0; border: none; border-radius: 6px;'
       + ' outline: none; background: transparent; color: var(--dsw-alias-label-secondary, #9aa0ab); cursor: pointer; }',

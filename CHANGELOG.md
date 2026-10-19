@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.5.5 — 2026-10-19
+
+- 提示语改为单句 `回车开启新会话`（英文 `Press Enter to start a new session`）：去掉 `搜索…` 前缀与括号说明，`placeholder` 与 `aria-label` 同源。
+- 提示语样式：`[data-qs="input"]::placeholder` 增加 `font-style: italic` 与 `opacity: 0.7`，与宿主其他控件的中性占位提示区分开，输入内容后对比更明显。
+- 测试：占位断言由 `includes('搜索')` 改成等值断言，并新增斜体 / 透明度两条样式断言。
+
 ## 0.5.4 — 2026-10-19
 
 - 外框不再左右各留 8px：`boxCss()` 里 `[data-dsh-ux-plus="quick-search"][data-ux-plus-instance]` 的 `padding` 由 `6px 8px` 改成 `6px var(--dsh-session-list-edge-inset, 12px) 6px 0`。宿主的 `.regionArea`（`margin-left:-4px / padding-left:4px / margin-right:-12px`）本来就是非对称的，搜索框作为它的第一个子元素，对称内边距只会让左边缘比会话行深 8px、右边缘比【工作区】控件横冲出去 4px —— 这就是「左侧多出一块空白」。
