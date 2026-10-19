@@ -389,8 +389,8 @@ test('mount inserts the box as the region first child and dispose removes every 
     assert.ok(rootNode.getAttribute('data-ux-plus-instance'), 'our box carries the instance token')
     const input = pick(rootNode, 'data-qs', 'input')
     assert.ok(input, 'the field holds an input')
-    assert.equal(input.getAttribute('placeholder'), '回车开启新会话', 'the hint is the bare sentence, no parentheses')
-    assert.equal(input.getAttribute('aria-label'), '回车开启新会话', 'the accessible name follows the same copy')
+    assert.equal(input.getAttribute('placeholder'), '直接搜，不用工作区', 'the hint is the bare sentence, no parentheses')
+    assert.equal(input.getAttribute('aria-label'), '直接搜，不用工作区', 'the accessible name follows the same copy')
     assert.equal(env.document.head.children.length, 2, 'one sheet for the box, one for the hidden workspace')
     assert.ok(env.document.head.children[0].textContent.includes('[data-qs="field"]'))
     const sheet = env.document.head.children[0].textContent

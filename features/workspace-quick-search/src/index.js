@@ -68,7 +68,7 @@ const NS = 'ux-plus-quick-search'
 /** Every user-visible string, keyed so the active DSH locale picks the row. */
 const MESSAGES = {
   zh: {
-    placeholder: '回车开启新会话',
+    placeholder: '直接搜，不用工作区',
     model: '模型',
     modelsEmpty: '还没有可用的模型',
     history: '搜索历史',
@@ -87,7 +87,7 @@ const MESSAGES = {
     days: '{n} 天前',
   },
   en: {
-    placeholder: 'Press Enter to start a new session',
+    placeholder: 'Just search, no workspace',
     model: 'Model',
     modelsEmpty: 'No models available yet',
     history: 'Search history',
