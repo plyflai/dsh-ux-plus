@@ -15,11 +15,12 @@
 import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import { test } from 'node:test'
+import { withTempHome } from './temp-home.mjs'
 
 const root = new URL('..', import.meta.url)
 
 /** Frozen feature ids (plan v2.5 naming freeze). */
-const FROZEN = ['conversation-typography', 'workspace-session-menu', 'workspace-recency-order', 'tool-ask-question-expanded', 'workspace-session-inherit', 'attention-favicon']
+const FROZEN = ['conversation-typography', 'workspace-session-menu', 'workspace-recency-order', 'tool-ask-question-expanded', 'workspace-session-inherit', 'attention-favicon', 'workspace-quick-search']
 
 /** The nine shell-seeded module-table specifiers (host platform.ts:8-14). */
 const SEEDS = [
@@ -363,10 +364,13 @@ test('the ux-plus switch keys are exactly the five frozen feature ids', async ()
     }
   }
   const host = await import(new URL('src/index.js', root).href)
-  const ctx = {}
-  const dispose = host.apply(ctx)
-  assert.deepEqual(Object.keys(host.Config({}).get()).sort(), [...FROZEN].sort())
-  dispose()
+  // `apply` also creates the quick search box's private workspace directory.
+  await withTempHome(() => {
+    const ctx = {}
+    const dispose = host.apply(ctx)
+    assert.deepEqual(Object.keys(host.Config({}).get()).sort(), [...FROZEN].sort())
+    dispose()
+  })
 })
 
 test('buildSettingsMessages covers every feature id in zh and en', async () => {
@@ -404,7 +408,7 @@ test('source imports use declared dependencies, shell seeds, or relative paths',
     for (const match of text.matchAll(/\bfrom\s+['"]([^'"]+)['"]/g)) specs.add(match[1])
     for (const match of text.matchAll(/\bimport\s*\(\s*['"]([^'"]+)['"]\s*\)/g)) specs.add(match[1])
     for (const match of text.matchAll(/\brequire\s*\(\s*['"]([^'"]+)['"]\s*\)/g)) specs.add(match[1])
-    const foreign = [...specs].filter((spec) => !spec.startsWith('./') && !spec.startsWith('../') && !allowed.includes(spec))
+    const foreign = [...specs].filter((spec) => !spec.startsWith('./') && !spec.startsWith('../') && !spec.startsWith('node:') && !allowed.includes(spec))
     assert.deepEqual(foreign, [], `${file} imports non-seed specifiers: ${foreign.join(', ')}`)
   }
 })
@@ -565,14 +569,18 @@ test('the D5 switch engine mounts and disposes each feature per switch value', a
       env.document.head.children.filter((c) => c.attributes['data-feature'] === 'tool-ask-question-expanded')
     const idleStyles = () =>
       env.document.head.children.filter((c) => c.dataset.dshUxPlus === 'idle-collapse-css')
+    const quickSearchStyles = () =>
+      env.document.head.children.filter((c) => String(c.attributes['data-feature'] || '').startsWith('workspace-quick-search'))
     const otherStyles = () =>
       env.document.head.children.filter(
         (c) => c.tagName === 'STYLE'
           && c.attributes['data-feature'] !== 'tool-ask-question-expanded'
+          && !String(c.attributes['data-feature'] || '').startsWith('workspace-quick-search')
           && c.dataset.dshUxPlus !== 'idle-collapse-css',
       )
     assert.equal(uxScope.subscribeCount(), 1)
     assert.equal(otherStyles().length, 1) // typography style
+    assert.equal(quickSearchStyles().length, 2, 'the quick search box brings its own sheet and the hidden-workspace rule')
     assert.equal(accentStyles().length, 1, 'the ask-question accent style is mounted')
     assert.equal(idleStyles().length, 1, 'the recency idle style tag is mounted')
     const menuRows = (id) => ctx.registrations.filter((row) => row.opts.id === id && !row.retired)
@@ -581,7 +589,7 @@ test('the D5 switch engine mounts and disposes each feature per switch value', a
     assert.equal(env.listenerCount('document', 'pointerdown'), 1, 'the inherit feature tracks the click anchor')
     assert.equal(env.listenerCount('document', 'click'), 0) // recency-order installs none
     assert.equal(env.windowListeners.storage, undefined)
-    assert.equal(env.moInstances.length, 2)
+    assert.equal(env.moInstances.length, 3)
     env.flushTimers()
     assert.equal(tree.style.display, 'flex', 'recency-order applied the visual order')
 
@@ -617,6 +625,11 @@ test('the D5 switch engine mounts and disposes each feature per switch value', a
     await uxScope.set('workspace-session-inherit', true)
     assert.equal(menuRows('dsh-ux-plus.inherit-session').length, 1, 'on re-registers the inherit menu row')
     assert.equal(env.listenerCount('document', 'pointerdown'), 1, 'on re-installs the click anchor tracker')
+
+    await uxScope.set('workspace-quick-search', false)
+    assert.equal(quickSearchStyles().length, 0, 'off removes the box sheet and the hidden-workspace rule (the workspace is visible again)')
+    await uxScope.set('workspace-quick-search', true)
+    assert.equal(quickSearchStyles().length, 2, 'on re-installs both sheets')
 
     disposeAll()
     assert.equal(menuRows('dsh-ux-plus.copy-session-id').length, 0)

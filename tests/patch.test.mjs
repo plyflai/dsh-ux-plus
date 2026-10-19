@@ -1,12 +1,14 @@
-import { readFile } from 'node:fs/promises'
+import { readFile, stat } from 'node:fs/promises'
 import test from 'node:test'
 import assert from 'node:assert/strict'
+import { join } from 'node:path'
+import { withTempHome } from './temp-home.mjs'
 
 const root = new URL('../', import.meta.url)
 const readJson = async (name) => JSON.parse(await readFile(new URL(name, root), 'utf8'))
 
 /** Frozen feature sub-package names (plan §3.8, directory names). */
-const FEATURES = ['conversation-typography', 'workspace-session-menu', 'workspace-recency-order', 'tool-ask-question-expanded', 'workspace-session-inherit', 'attention-favicon']
+const FEATURES = ['conversation-typography', 'workspace-session-menu', 'workspace-recency-order', 'tool-ask-question-expanded', 'workspace-session-inherit', 'attention-favicon', 'workspace-quick-search']
 
 /**
  * Collect `- id:` rows (with their following `name:`) from a patch document.
@@ -74,21 +76,27 @@ test('the package no longer depends on the legacy feature packages', async () =>
 })
 
 test('host entries expose writable UX Plus and typography configurations', async () => {
-  const host = await import(new URL('src/index.js', root).href)
-  const ctx = {}
-  const dispose = host.apply(ctx)
-  assert.deepEqual(host.Config({}).get(), Object.fromEntries(FEATURES.map((name) => [name, true])))
-  assert.deepEqual(host.Config({ [FEATURES[0]]: false }).get(), Object.fromEntries(FEATURES.map((name) => [name, name !== FEATURES[0]])))
-  const tweak = await import(new URL('src/ui-tweak.js', root).href)
-  assert.deepEqual(tweak.Config({}).get(), { fontSize: 'l', chatWidth: 'l' })
-  assert.deepEqual(tweak.Config({ fontSize: 'xl', chatWidth: 's' }).get(), { fontSize: 'xl', chatWidth: 's' })
-  assert.throws(() => tweak.Config({ fontSize: 'nope' }).get())
-  dispose()
-  for (const name of FEATURES) {
-    const mod = await import(new URL(`features/${name}/src/index.js`, root).href)
-    assert.equal(mod.feature.id, name)
-    const release = mod.feature.host(ctx)
-    assert.equal(typeof release, 'function')
-    release()
-  }
+  await withTempHome(async (home) => {
+    const host = await import(new URL('src/index.js', root).href)
+    const ctx = {}
+    const dispose = host.apply(ctx)
+    assert.deepEqual(host.Config({}).get(), Object.fromEntries(FEATURES.map((name) => [name, true])))
+    assert.deepEqual(host.Config({ [FEATURES[0]]: false }).get(), Object.fromEntries(FEATURES.map((name) => [name, name !== FEATURES[0]])))
+    // The quick search box's private workspace must exist before the host can
+    // register it (a non-directory path is rejected) and a browser cannot
+    // create one, so the host half creates it at load.
+    assert.ok((await stat(join(home, '.dsh-ux-plus', 'search'))).isDirectory())
+    const tweak = await import(new URL('src/ui-tweak.js', root).href)
+    assert.deepEqual(tweak.Config({}).get(), { fontSize: 'l', chatWidth: 'l' })
+    assert.deepEqual(tweak.Config({ fontSize: 'xl', chatWidth: 's' }).get(), { fontSize: 'xl', chatWidth: 's' })
+    assert.throws(() => tweak.Config({ fontSize: 'nope' }).get())
+    dispose()
+    for (const name of FEATURES) {
+      const mod = await import(new URL(`features/${name}/src/index.js`, root).href)
+      assert.equal(mod.feature.id, name)
+      const release = mod.feature.host(ctx)
+      assert.equal(typeof release, 'function')
+      release()
+    }
+  })
 })

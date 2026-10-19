@@ -10,6 +10,16 @@ Small interface improvements for the DSH Web chat. Each feature has its own swit
 
 **Targets the Web UI of [DeepSeek Harness 0.2.1-rc.1](https://github.com/deepseek-ai/deepseek-harness/releases/tag/dsh-v0.2.1-rc.1).**
 
+## New in 0.5.0 — search like a search engine
+
+A search box now lives under **Automated tasks** in the sidebar: type, press Enter, and you get exactly the session UI you already know — except this session files itself into a hidden workspace instead of your sidebar.
+
+- magnifier on the left, a tiny model picker on the right (host default model unless you pick one)
+- the clock icon on the right is history: your last 50 searches, one click back to that session
+- the hidden workspace is `.dsh-ux-plus/search` under your home directory, created on first use and never shown in the sidebar
+
+[Details →](#workspace-quick-search)
+
 ## New in 0.4.0 — the tab tells you what's happening
 
 The whale favicon keeps its shape and carries three signals while you sit on another tab:
@@ -24,6 +34,7 @@ The signals are independent and compose freely; plain whale when nothing is up. 
 
 | Feature | What it does | Preview |
 | --- | --- | --- |
+| Workspace quick search | A persistent sidebar search box: Enter opens an ordinary session, filed into a hidden workspace, with the last 50 searches kept in history. | — |
 | Attention favicon | The tab icon breathes while anything computes, turns green for finished-and-unread, blinks an orange dot while something awaits your click. | — |
 | Workspace recency order | What is live right now sits in one green-backed Active block with status dots; the history stays hidden below it behind the host's own "Expand N more sessions" button; idle workspaces collapse themselves and show their age on hover. | <img src="docs/images/recency-folded.png" width="200" alt="Active block with the expand button pinned below it"> |
 | Conversation typography | Pick a comfortable font size and reading width for the chat area — without zooming the whole interface. | <img src="docs/images/typography.png" width="300" alt="Chat area rendering"> |
@@ -32,6 +43,21 @@ The signals are independent and compose freely; plain whale when nothing is up. 
 | Ask question expanded | Finished question cards stay expanded — checking a decision costs one less click. | — |
 
 ## Feature details
+
+### Workspace quick search
+
+A search box sits permanently under **Automated tasks** in the sidebar and works like a search engine: type, press Enter, and a new session opens — the same UI as any other session.
+
+| Element | Behaviour |
+| --- | --- |
+| Search box (magnifier on the left) | Enter submits; Shift+Enter breaks the line; an Enter that ends an IME composition never submits by accident |
+| Model picker | A minimal dropdown on the right listing model names only; leave it alone to use the host default; your pick is remembered locally for next time |
+| Clock icon (right) | Opens history: the last 50 searches, one click reopens that session, one button clears the list |
+| Sidebar | Search sessions **never show up** — they all live in the hidden workspace |
+
+- The hidden workspace is `.dsh-ux-plus/search` in your home directory, created on first use. It is not in the workspace list and has no group in the session tree, yet the history popup still takes you back to any old search session.
+- The box only appears while the sidebar is expanded; in the collapsed rail it steps aside.
+- Turning the switch off removes the hidden-workspace rule too — those sessions simply reappear in the sidebar, nothing is lost.
 
 ### Attention favicon
 
@@ -116,6 +142,7 @@ npm run build   # tsdown emits lib/client.js (classic script, committed to the r
 
 The three most recent entries; full history in [CHANGELOG.md](CHANGELOG.md).
 
+- **v0.5.0 · 2026-10-19** — New "Workspace quick search": a persistent sidebar box opens an ordinary session on Enter (with a minimal model picker). Those sessions are filed into the hidden workspace `.dsh-ux-plus/search`, and the clock icon reopens the last 50 searches.
 - **v0.4.5 · 2026-10-18** — Icon is now a die-cut sticker: no background tile, just the whale and the UX+ mark with a white edge tracing the combined silhouette (the mark keeps its own halo). No behaviour change.
 - **v0.4.4 · 2026-10-18** — Icon polish: the white edge now frames the whole tile instead of outlining the UX+ letters; the inline README icon grows to 44px. No behaviour change.
 
