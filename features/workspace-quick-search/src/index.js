@@ -70,6 +70,7 @@ const MESSAGES = {
   zh: {
     placeholder: '搜索…（回车直接开新会话）',
     model: '模型',
+    modelsEmpty: '还没有可用的模型',
     history: '搜索历史',
     historyTitle: '最近 50 条搜索',
     historyEmpty: '还没有搜索记录',
@@ -88,6 +89,7 @@ const MESSAGES = {
   en: {
     placeholder: 'Search… (Enter opens a new session)',
     model: 'Model',
+    modelsEmpty: 'No models available yet',
     history: 'Search history',
     historyTitle: 'Last 50 searches',
     historyEmpty: 'No searches yet',
@@ -116,7 +118,7 @@ export const HISTORY_LIMIT = 50
 
 /** Root marker of the injected box. */
 const ROOT_VALUE = 'quick-search'
-/** Root marker of the history popup (a body child: the sidebar clips fixed-free content). */
+/** Root marker of the popup panels (a body child: the sidebar clips overflow). */
 const MENU_VALUE = 'quick-search-history'
 /** Host row-key prefixes (ui-workspace `Rows.tsx:245,590`). */
 const WORKSPACE_ROW_PREFIX = 'workspace:'
@@ -333,28 +335,46 @@ function svgIcon(doc, paths, size) {
 const MAGNIFIER_PATHS = ['M7 2.6a4.4 4.4 0 1 0 0 8.8 4.4 4.4 0 0 0 0-8.8', 'M10.3 10.3 14 14']
 /** Clock with a backward arrow: the history entry point. */
 const CLOCK_PATHS = ['M8 2.4a5.6 5.6 0 1 0 0 11.2A5.6 5.6 0 0 0 8 2.4', 'M8 5.1v3.1l2.1 1.3']
+/**
+ * Chip outline with pins: the model picker. Icon only — the picker is as small
+ * as the other two controls, and the current model is in its tooltip and menu.
+ */
+const MODEL_PATHS = [
+  'M5.2 5.2h5.6v5.6H5.2z',
+  'M6.6 2.6v2.6M9.4 2.6v2.6M6.6 10.8v2.6M9.4 10.8v2.6',
+  'M2.6 6.6h2.6M2.6 9.4h2.6M10.8 6.6h2.6M10.8 9.4h2.6',
+]
 
 /** Stylesheet for the box and its popup (authored text: no hashed class names). */
 function boxCss() {
   const scope = `[data-dsh-ux-plus="${ROOT_VALUE}"]`
   const menu = `[data-dsh-ux-plus="${MENU_VALUE}"]`
   return [
-    `${scope} { display: flex; flex-direction: column; gap: 3px; padding: 6px 8px 4px; }`,
-    `${scope} [data-qs="field"] { display: flex; align-items: center; gap: 6px; height: 30px; padding: 0 5px 0 8px;`
+    `${scope} { display: flex; flex-direction: column; gap: 3px; box-sizing: border-box; width: 100%; padding: 6px 8px; }`,
+    `${scope} [data-qs="field"] { display: flex; align-items: center; justify-content: flex-start; gap: 6px; box-sizing: border-box;`
+      + ' height: 30px; padding: 0 4px 0 8px; line-height: 1;'
       + ' border-radius: 8px; border: 1px solid transparent;'
       + ' background: var(--dsw-alias-bg-layer-2, rgba(128, 128, 128, 0.10));'
       + ' transition: border-color 120ms ease; }',
     `${scope} [data-qs="field"]:focus-within { border-color: var(--dsw-alias-border-strong, #3a3f4b); }`,
-    `${scope} [data-qs="glass"] { display: inline-flex; flex: 0 0 auto; color: var(--dsw-alias-label-secondary, #9aa0ab); }`,
-    `${scope} [data-qs="input"] { flex: 1 1 auto; min-width: 0; height: 100%; padding: 0; border: none; outline: none;`
-      + ' background: transparent; color: var(--dsw-alias-label-primary, #e8e8e8); font: inherit; font-size: 13px; }',
+    `${scope} [data-qs="glass"] { display: inline-flex; flex: 0 0 auto; align-items: center; justify-content: center;`
+      + ' width: 16px; height: 16px; line-height: 0; color: var(--dsw-alias-label-secondary, #9aa0ab); }',
+    // Every icon is a block so it centres by geometry, not by text baseline.
+    `${scope} [data-qs] svg { display: block; }`,
+    `${scope} [data-qs="input"] { flex: 1 1 auto; align-self: stretch; min-width: 0; height: auto; margin: 0; padding: 0;`
+      + ' box-sizing: border-box; border: none; outline: none; background: transparent; line-height: 1.25;'
+      + ' color: var(--dsw-alias-label-primary, #e8e8e8); font: inherit; font-size: 13px; }',
     `${scope} [data-qs="input"]::placeholder { color: var(--dsw-alias-label-secondary, #9aa0ab); }`,
-    `${scope} [data-qs="model"] { flex: 0 0 auto; max-width: 92px; height: 22px; padding: 0 2px; border: none; border-radius: 6px;`
-      + ' outline: none; background: transparent; color: var(--dsw-alias-label-secondary, #9aa0ab); font: inherit; font-size: 11px;'
-      + ' cursor: pointer; }',
-    `${scope} [data-qs="model"]:hover { color: var(--dsw-alias-label-primary, #e8e8e8); }`,
+    `${scope} [data-qs="model"] { flex: 0 0 auto; position: relative; display: inline-flex; align-items: center;`
+      + ' justify-content: center; width: 22px; height: 22px; padding: 0; line-height: 0; border: none; border-radius: 6px;'
+      + ' outline: none; background: transparent; color: var(--dsw-alias-label-secondary, #9aa0ab); cursor: pointer; }',
+    `${scope} [data-qs="model"]:hover { color: var(--dsw-alias-label-primary, #e8e8e8);`
+      + ' background: var(--dsw-alias-interactive-bg-hover, rgba(128, 128, 128, 0.12)); }',
+    // A picked non-default model keeps a dot on the chip: the picker carries no text.
+    `${scope} [data-qs="model"][data-qs-picked="true"]::after { content: ""; position: absolute; right: 2px; bottom: 2px;`
+      + ' width: 4px; height: 4px; border-radius: 50%; background: var(--dsw-alias-label-primary, #e8e8e8); }',
     `${scope} [data-qs="history"] { flex: 0 0 auto; display: inline-flex; align-items: center; justify-content: center;`
-      + ' width: 22px; height: 22px; padding: 0; border: none; border-radius: 6px; background: transparent;'
+      + ' width: 22px; height: 22px; padding: 0; line-height: 0; border: none; border-radius: 6px; background: transparent;'
       + ' color: var(--dsw-alias-label-secondary, #9aa0ab); cursor: pointer; }',
     `${scope} [data-qs="history"]:hover { color: var(--dsw-alias-label-primary, #e8e8e8);`
       + ' background: var(--dsw-alias-interactive-bg-hover, rgba(128, 128, 128, 0.12)); }',
@@ -374,6 +394,9 @@ function boxCss() {
       + ' border: none; border-radius: 6px; background: transparent; color: inherit; font: inherit; text-align: left;'
       + ' cursor: pointer; }',
     `${menu} [data-qs="menu-row"]:hover { background: var(--dsw-alias-interactive-bg-hover, rgba(128, 128, 128, 0.12)); }`,
+    `${menu} [data-qs="menu-row"][data-qs-active="true"] { background: var(--dsw-alias-interactive-bg-hover, rgba(128, 128, 128, 0.12)); }`,
+    `${menu} [data-qs="menu-row"][data-qs-active="true"] [data-qs="menu-label"]::before { content: "✓ "; }`,
+    `${menu} [data-qs="menu-label"] { font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }`,
     `${menu} [data-qs="menu-query"] { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }`,
     `${menu} [data-qs="menu-meta"] { font-size: 11px; color: var(--dsw-alias-label-secondary, #9aa0ab); }`,
     `${menu} [data-qs="menu-empty"] { padding: 10px 8px; color: var(--dsw-alias-label-secondary, #9aa0ab); }`,
@@ -451,9 +474,16 @@ export function client(ctx, deps) {
 
   const store = storage()
 
-  /** Everything the box owns; `dir` is null when the host reported no home. */
+  /**
+   * Everything the box owns.
+   *
+   * `dir` starts null and is resolved on demand by {@link searchDir}: the host
+   * home only arrives with the connection's first ready frame, which is later
+   * than this mount, so reading it once here would leave the box permanently
+   * unusable.
+   */
   const state = {
-    dir: searchWorkspacePath(readHostHome()),
+    dir: null,
     workspaceId: null,
     extraHidden: new Set(),
     models: [],
@@ -468,6 +498,12 @@ export function client(ctx, deps) {
     const remote = ctx && ctx.remote
     const host = remote && remote.$host
     return host && typeof host.home === 'string' ? host.home : null
+  }
+
+  /** The private workspace directory, resolved once the ready frame landed. */
+  function searchDir() {
+    if (state.dir === null) state.dir = searchWorkspacePath(readHostHome())
+    return state.dir
   }
 
   /** The picked model, persisted as `{provider, model}`. */
@@ -508,7 +544,7 @@ export function client(ctx, deps) {
   // Placement: one stable node, re-inserted whenever React or the user moves it.
   // -------------------------------------------------------------------------
 
-  const refs = { root: null, input: null, select: null, history: null, status: null }
+  const refs = { root: null, input: null, model: null, history: null, status: null }
 
   /** The text field placeholder / labels follow the active locale. */
   function applyCopy() {
@@ -516,7 +552,7 @@ export function client(ctx, deps) {
       refs.input.setAttribute('placeholder', t('placeholder'))
       refs.input.setAttribute('aria-label', t('placeholder'))
     }
-    if (refs.select !== null) refs.select.setAttribute('aria-label', t('model'))
+    if (refs.model !== null) refs.model.setAttribute('aria-label', modelTitle())
     if (refs.history !== null) {
       refs.history.setAttribute('aria-label', t('history'))
       refs.history.setAttribute('title', t('history'))
@@ -543,28 +579,29 @@ export function client(ctx, deps) {
     glass.appendChild(svgIcon(document, MAGNIFIER_PATHS, 14))
     const input = el('input', { 'data-qs': 'input', type: 'text', spellcheck: 'false', autocomplete: 'off' })
     input.value = ''
-    const select = el('select', { 'data-qs': 'model' })
+    const model = el('button', { 'data-qs': 'model', type: 'button', 'data-qs-picked': 'false' })
+    model.appendChild(svgIcon(document, MODEL_PATHS, 14))
     const history = el('button', { 'data-qs': 'history', type: 'button' })
     history.appendChild(svgIcon(document, CLOCK_PATHS, 14))
     const status = el('div', { 'data-qs': 'status', role: 'status' })
     field.appendChild(glass)
     field.appendChild(input)
-    field.appendChild(select)
+    field.appendChild(model)
     field.appendChild(history)
     root.appendChild(field)
     root.appendChild(status)
 
     input.addEventListener('keydown', onKeyDown)
-    select.addEventListener('change', onModelChange)
+    model.addEventListener('click', openModelMenu)
     history.addEventListener('click', openHistory)
 
     refs.root = root
     refs.input = input
-    refs.select = select
+    refs.model = model
     refs.history = history
     refs.status = status
     applyCopy()
-    renderModels()
+    renderModelButton()
     return root
   }
 
@@ -574,6 +611,7 @@ export function client(ctx, deps) {
     if (region === null) {
       // Rail mode / no list yet: the box has no seat, and must not linger.
       if (refs.root !== null && refs.root.parentNode !== null) refs.root.parentNode.removeChild(refs.root)
+      closePanel()
       return
     }
     if (refs.root === null) refs.root = buildNode()
@@ -608,6 +646,9 @@ export function client(ctx, deps) {
   hideTag.textContent = ''
   if (document.head !== null && document.head !== undefined) document.head.appendChild(hideTag)
 
+  /** Last hide-rule text written: an unchanged pass must not touch the sheet. */
+  let lastHideCss = null
+
   /** Ready workspace rows, or [] while the store is still loading. */
   function workspaceRows() {
     const snapshot = snapshotOf(deps && deps.workspaces && deps.workspaces.list)
@@ -617,8 +658,9 @@ export function client(ctx, deps) {
 
   /** The private workspace row, when it already exists (never creates one). */
   function findSearchWorkspace() {
-    if (state.dir === null) return null
-    const target = trimSeparators(state.dir)
+    const dir = searchDir()
+    if (dir === null) return null
+    const target = trimSeparators(dir)
     for (const row of workspaceRows()) {
       if (row !== null && typeof row === 'object' && trimSeparators(row.path) === target) return row
     }
@@ -631,7 +673,11 @@ export function client(ctx, deps) {
     if (row !== null && typeof row.workspaceId === 'string') state.workspaceId = row.workspaceId
     const ids = new Set(state.extraHidden)
     if (row !== null && Array.isArray(row.sessionIds)) for (const sessionId of row.sessionIds) ids.add(sessionId)
-    hideTag.textContent = hiddenCss(state.workspaceId, ids)
+    const css = hiddenCss(state.workspaceId, ids)
+    // Every scheduled pass calls this: only touch the sheet when the rule changed.
+    if (css === lastHideCss) return
+    lastHideCss = css
+    hideTag.textContent = css
   }
 
   /**
@@ -646,10 +692,11 @@ export function client(ctx, deps) {
       return row.workspaceId
     }
     if (!create) return null
-    if (state.dir === null) throw new Error(t('noHome'))
+    const dir = searchDir()
+    if (dir === null) throw new Error(t('noHome'))
     const workspaces = deps && deps.workspaces
     if (!workspaces || typeof workspaces.create !== 'function') throw new Error(t('noWorkspace'))
-    const created = await workspaces.create({ path: state.dir })
+    const created = await workspaces.create({ path: dir })
     const workspaceId = created && typeof created.workspaceId === 'string' ? created.workspaceId : null
     if (workspaceId === null) throw new Error(t('noWorkspace'))
     state.workspaceId = workspaceId
@@ -668,40 +715,37 @@ export function client(ctx, deps) {
       : null
   }
 
-  /** Which row the `<select>` should show: remembered pick, else the host default. */
+  /** The row the box will use: the remembered pick, else the host default. */
   function selectedRow() {
     for (const candidate of [state.modelKey, state.defaultKey]) {
       if (candidate === null) continue
       const hit = state.models.find((row) => selectionKey(row) === candidate)
       if (hit !== undefined) return hit
     }
-    return state.models.length > 0 ? state.models[0] : null
+    return null
   }
 
-  /** Re-render the `<option>` list from the loaded catalog. */
-  function renderModels() {
-    const select = refs.select
-    if (select === null) return
-    while (select.children.length > 0) select.removeChild(select.children[0])
-    if (state.models.length === 0) {
-      const placeholder = document.createElement('option')
-      placeholder.value = '-1'
-      placeholder.textContent = '—'
-      placeholder.disabled = true
-      placeholder.selected = true
-      select.appendChild(placeholder)
-      select.value = '-1'
-      return
-    }
-    for (const row of state.models) {
-      const option = document.createElement('option')
-      option.value = String(row.index)
-      option.textContent = row.label
-      option.title = `${row.group} · ${row.model}`
-      select.appendChild(option)
-    }
+  /** Tooltip / aria label: the picked model's own name (the icon carries no text). */
+  function modelTitle() {
     const picked = selectedRow()
-    select.value = String(picked === null ? state.models[0].index : picked.index)
+    return picked === null ? t('model') : `${t('model')}：${picked.label}`
+  }
+
+  /** Reflect the pick on the icon; a dot marks a non-default choice. */
+  function renderModelButton() {
+    const button = refs.model
+    if (button === null) return
+    const key = selectionKey(selectedRow())
+    button.setAttribute('data-qs-picked', key !== null && key !== state.defaultKey ? 'true' : 'false')
+    button.setAttribute('title', modelTitle())
+    button.setAttribute('aria-label', modelTitle())
+  }
+
+  /** Remember one menu row as the pick (the menu closes itself). */
+  function pickModel(row) {
+    state.modelKey = row === null || row === undefined ? null : selectionKey(row)
+    saveModelKey()
+    renderModelButton()
   }
 
   async function loadModels() {
@@ -720,14 +764,7 @@ export function client(ctx, deps) {
     state.models = flattenModels(catalog)
     const fallback = catalog.default
     state.defaultKey = selectionKey(fallback)
-    renderModels()
-  }
-
-  function onModelChange() {
-    const index = Number(refs.select.value)
-    const row = state.models.find((candidate) => candidate.index === index)
-    state.modelKey = row === undefined ? null : selectionKey(row)
-    saveModelKey()
+    renderModelButton()
   }
 
   // -------------------------------------------------------------------------
@@ -822,14 +859,19 @@ export function client(ctx, deps) {
 
   let popup = null
   let popupCleanup = null
+  let popupAnchor = null
+  let popupKind = null
 
-  function closeHistory() {
+  /** Close whichever panel is open (search history or the model menu). */
+  function closePanel() {
     if (popupCleanup !== null) {
       popupCleanup()
       popupCleanup = null
     }
     if (popup !== null && popup.parentNode !== null) popup.parentNode.removeChild(popup)
     popup = null
+    popupAnchor = null
+    popupKind = null
   }
 
   /** Anchor the fixed popup under the clock icon, clamped to the viewport. */
@@ -849,8 +891,8 @@ export function client(ctx, deps) {
 
   /** Open (or refresh) the history popup. */
   function openHistory() {
-    if (popup !== null) {
-      closeHistory()
+    if (popup !== null && popupKind === 'history') {
+      closePanel()
       return
     }
     pruneHistory()
@@ -863,7 +905,7 @@ export function client(ctx, deps) {
     clear.addEventListener('click', () => {
       state.history = []
       persistHistory()
-      closeHistory()
+      closePanel()
     })
     head.appendChild(label)
     if (state.history.length > 0) head.appendChild(clear)
@@ -886,31 +928,84 @@ export function client(ctx, deps) {
         row.appendChild(query)
         row.appendChild(meta)
         row.addEventListener('click', () => {
-          closeHistory()
+          closePanel()
           const uiWorkspace = typeof ctx.get === 'function' ? ctx.get('uiWorkspace') : undefined
           if (uiWorkspace && typeof uiWorkspace.openSession === 'function') uiWorkspace.openSession(entry.sessionId)
         })
         node.appendChild(row)
       }
     }
+    openPanel(node, refs.history, 'history')
+  }
+
+  /** The model menu: one row per catalog model, the current pick ticked. */
+  function openModelMenu() {
+    if (popup !== null && popupKind === 'model') {
+      closePanel()
+      return
+    }
+    const node = el('div', { 'data-dsh-ux-plus': MENU_VALUE, role: 'dialog', 'aria-label': t('model') })
+    const head = el('div', { 'data-qs': 'menu-head' })
+    const label = document.createElement('span')
+    label.textContent = t('model')
+    head.appendChild(label)
+    node.appendChild(head)
+    if (state.models.length === 0) {
+      const empty = el('div', { 'data-qs': 'menu-empty' })
+      empty.textContent = t('modelsEmpty')
+      node.appendChild(empty)
+    } else {
+      const currentKey = selectionKey(selectedRow())
+      for (const row of state.models) {
+        const active = currentKey !== null && selectionKey(row) === currentKey
+        const button = el('button', { 'data-qs': 'menu-row', type: 'button' })
+        if (active) button.setAttribute('data-qs-active', 'true')
+        const name = el('span', { 'data-qs': 'menu-label' })
+        name.textContent = row.label
+        const meta = el('span', { 'data-qs': 'menu-meta' })
+        meta.textContent = `${row.group} · ${row.model}`
+        button.appendChild(name)
+        button.appendChild(meta)
+        button.addEventListener('click', () => {
+          pickModel(row)
+          closePanel()
+        })
+        node.appendChild(button)
+      }
+    }
+    openPanel(node, refs.model, 'model')
+  }
+
+  /**
+   * Mount one panel as a body child (the sidebar region clips overflowing
+   * content), anchored under `anchor`, closed by outside pointerdown / Escape.
+   *
+   * @param {object} node - the populated panel element.
+   * @param {object | null} anchor - the control the panel points at.
+   * @param {string} kind - 'history' | 'model': clicking that icon again closes it.
+   */
+  function openPanel(node, anchor, kind) {
+    closePanel()
     document.body.appendChild(node)
     popup = node
-    positionPopup(node, refs.history)
+    popupAnchor = anchor
+    popupKind = kind
+    positionPopup(node, anchor)
 
     const onDocumentPointer = (event) => {
       if (popup === null) return
       let node2 = event && event.target
       while (node2 !== null && node2 !== undefined) {
-        if (node2 === popup || node2 === refs.history) return
+        if (node2 === popup || node2 === popupAnchor) return
         node2 = node2.parentNode
       }
-      closeHistory()
+      closePanel()
     }
     const onKey = (event) => {
-      if (event && event.key === 'Escape') closeHistory()
+      if (event && event.key === 'Escape') closePanel()
     }
     const onResize = () => {
-      if (popup !== null) positionPopup(popup, refs.history)
+      if (popup !== null) positionPopup(popup, popupAnchor)
     }
     const offs = []
     if (typeof document.addEventListener === 'function') {
@@ -957,7 +1052,7 @@ export function client(ctx, deps) {
   return function dispose() {
     if (disposed) return
     disposed = true
-    closeHistory()
+    closePanel()
     observer.disconnect()
     if (pending !== null) {
       window.clearTimeout(pending)
@@ -970,7 +1065,7 @@ export function client(ctx, deps) {
     if (hideTag.parentNode !== null && hideTag.parentNode !== undefined) hideTag.parentNode.removeChild(hideTag)
     refs.root = null
     refs.input = null
-    refs.select = null
+    refs.model = null
     refs.history = null
     refs.status = null
   }

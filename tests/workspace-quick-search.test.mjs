@@ -493,7 +493,7 @@ test('the missing private workspace is registered at the shared path first', asy
   }
 })
 
-test('a non-default model pick is selected once and remembered', async () => {
+test('the model icon opens a menu, and a non-default pick is selected once and remembered', async () => {
   const env = makeEnv()
   installGlobals(env)
   try {
@@ -501,25 +501,76 @@ test('a non-default model pick is selected once and remembered', async () => {
     const items = [{ workspaceId: 'ws-search', path: WORKSPACE_PATH, title: 'search', sessionIds: [] }]
     const { deps } = makeDeps({ items })
     const { dispose, rootNode } = await mount(env, ctx, deps)
-    const select = pick(rootNode, 'data-qs', 'model')
-    assert.equal(select.children.length, 2, 'one option per catalog model')
-    select.value = '1'
-    select.dispatch('change', {})
+    const model = pick(rootNode, 'data-qs', 'model')
+    assert.equal(String(model.tagName), 'BUTTON', 'the picker is a button, not a native dropdown')
+    assert.equal(model.children.length, 1, 'the picker holds the chip icon and no text')
+    assert.equal(model.getAttribute('data-qs-picked'), 'false', 'the host default leaves the chip bare')
+    assert.ok(model.getAttribute('title').includes('DeepSeek Chat'), 'the tooltip names the current model')
+
+    model.dispatch('click', {})
+    const panels = () => collect(env.document.body, (el) => el.getAttribute('data-dsh-ux-plus') === 'quick-search-history')
+    const rows = collect(panels()[0], (el) => el.getAttribute('data-qs') === 'menu-row')
+    assert.equal(rows.length, 2, 'one row per catalog model')
+    assert.equal(rows[0].getAttribute('data-qs-active'), 'true', 'the current pick is ticked')
+    assert.equal(rows[1].getAttribute('data-qs-active'), null)
+
+    rows[1].dispatch('click', {})
+    assert.equal(panels().length, 0, 'picking closes the menu')
+    assert.equal(model.getAttribute('data-qs-picked'), 'true', 'a non-default pick marks the chip')
     assert.deepEqual(
       JSON.parse(env.window.localStorage.getItem('dsh.ux-plus.quick-search.model')),
       { provider: 'deepseek', model: 'deepseek-reasoner' },
     )
+
+    // The same icon toggles the menu shut.
+    model.dispatch('click', {})
+    assert.equal(panels().length, 1)
+    model.dispatch('click', {})
+    assert.equal(panels().length, 0)
+
     const input = pick(rootNode, 'data-qs', 'input')
     input.value = 'q'
     pressEnter(input)
     await settle()
     assert.deepEqual(calls.selected, [{ sessionId: 'session-1', provider: 'deepseek', model: 'deepseek-reasoner' }])
     dispose()
-    // Remount keeps the pick.
+    // Remount keeps the pick — and still shows no text on the chip.
     const next = makeCtx()
     const remount = await mount(env, next.ctx, makeDeps({ items }).deps)
-    assert.equal(pick(remount.rootNode, 'data-qs', 'model').value, '1')
+    const again = pick(remount.rootNode, 'data-qs', 'model')
+    assert.equal(again.children.length, 1)
+    assert.equal(again.getAttribute('data-qs-picked'), 'true')
+    assert.ok(again.getAttribute('title').includes('DeepSeek Reasoner'))
     remount.dispose()
+  } finally {
+    uninstallGlobals(env)
+  }
+})
+
+test('Enter works when the host home only arrives after mount', async () => {
+  const env = makeEnv()
+  installGlobals(env)
+  try {
+    // `remote.$host.home` is undefined until the first ready frame: the box must
+    // resolve its directory lazily instead of giving up at mount time.
+    const { ctx, calls } = makeCtx({ home: null })
+    const items = [{ workspaceId: 'ws-search', path: WORKSPACE_PATH, title: 'search', sessionIds: [] }]
+    const { deps, calls: depsCalls } = makeDeps({ items })
+    const { dispose, rootNode } = await mount(env, ctx, deps)
+    const input = pick(rootNode, 'data-qs', 'input')
+    input.value = 'late home'
+    pressEnter(input)
+    await settle()
+    assert.deepEqual(calls.opened, [], 'without a home the box reports instead of guessing')
+    assert.equal(pick(rootNode, 'data-qs', 'status').getAttribute('data-qs-state'), 'error')
+
+    ctx.remote.$host = { home: HOME }
+    pressEnter(input)
+    await settle()
+    assert.deepEqual(depsCalls.workspacesCreate, [], 'the private workspace is found by its path')
+    assert.deepEqual(depsCalls.create, [{ workspaceId: 'ws-search' }])
+    assert.deepEqual(calls.opened, ['session-1'], 'the box recovered as soon as the home landed')
+    dispose()
   } finally {
     uninstallGlobals(env)
   }

@@ -50,8 +50,8 @@ A search box sits permanently under **Automated tasks** in the sidebar and works
 
 | Element | Behaviour |
 | --- | --- |
-| Search box (magnifier on the left) | Enter submits; Shift+Enter breaks the line; an Enter that ends an IME composition never submits by accident |
-| Model picker | A minimal dropdown on the right listing model names only; leave it alone to use the host default; your pick is remembered locally for next time |
+| Search box (magnifier on the left) | Enter searches straight away (the field is single-line); an Enter that ends an IME composition never submits by accident |
+| Model picker | A small chip icon on the right: click it for the model list (the current pick is ticked). Leave it alone to use the host default; a non-default pick puts a dot on the chip and is remembered locally |
 | Clock icon (right) | Opens history: the last 50 searches, one click reopens that session, one button clears the list |
 | Sidebar | Search sessions **never show up** — they all live in the hidden workspace |
 
@@ -142,6 +142,7 @@ npm run build   # tsdown emits lib/client.js (classic script, committed to the r
 
 The three most recent entries; full history in [CHANGELOG.md](CHANGELOG.md).
 
+- **v0.5.1 · 2026-10-19** — Quick search polish: the model picker is now a small chip icon that opens a menu (a dot marks a non-default pick), the box contents are properly centred, and the box no longer needs `remote.$host.home` at mount — Enter searches as soon as the connection is ready.
 - **v0.5.0 · 2026-10-19** — New "Workspace quick search": a persistent sidebar box opens an ordinary session on Enter (with a minimal model picker). Those sessions are filed into the hidden workspace `.dsh-ux-plus/search`, and the clock icon reopens the last 50 searches.
 - **v0.4.5 · 2026-10-18** — Icon is now a die-cut sticker: no background tile, just the whale and the UX+ mark with a white edge tracing the combined silhouette (the mark keeps its own halo). No behaviour change.
 - **v0.4.4 · 2026-10-18** — Icon polish: the white edge now frames the whole tile instead of outlining the UX+ letters; the inline README icon grows to 44px. No behaviour change.
