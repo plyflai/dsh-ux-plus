@@ -48,6 +48,8 @@ The signals are independent and compose freely; plain whale when nothing is up. 
 
 A search box sits permanently under **Automated tasks** in the sidebar and works like a search engine: type, press Enter, and a new session opens — the same UI as any other session.
 
+![The box sits above the workspace list: magnifier on the left, model and history icons on the right, one faint italic hint when empty](docs/images/quick-search.png)
+
 | Element | Behaviour |
 | --- | --- |
 | Search box (magnifier on the left) | Enter searches straight away (the field is single-line); an Enter that ends an IME composition never submits by accident |
@@ -58,6 +60,10 @@ A search box sits permanently under **Automated tasks** in the sidebar and works
 - The hidden workspace is `.dsh-ux-plus/search` in your home directory, created on first use. It is not in the workspace list and has no group in the session tree, yet the history popup still takes you back to any old search session.
 - The box only appears while the sidebar is expanded; in the collapsed rail it steps aside.
 - Turning the switch off removes the hidden-workspace rule too — those sessions simply reappear in the sidebar, nothing is lost.
+
+Type a question in that box, the two icons on the right stay put, Enter opens an ordinary session:
+
+![A question typed into the box, the model and history icons unchanged](docs/images/quick-search-typed.png)
 
 ### Attention favicon
 
@@ -142,7 +148,7 @@ npm run build   # tsdown emits lib/client.js (classic script, committed to the r
 
 The three most recent entries; full history in [CHANGELOG.md](CHANGELOG.md).
 
-- **v0.5.6 · 2026-10-19** — The hint is now `直接搜，不用工作区` (`Just search, no workspace`): one clause for the action, one for "no workspace to set up first" — no parentheses, no mechanism words.
+- **v0.5.6 · 2026-10-19** — The hint is now `直接搜，不用工作区` (`Just search, no workspace`): one clause for the action, one for "no workspace to set up first" — no parentheses, no mechanism words. The feature section also gained two screenshots (empty and typed state).
 - **v0.5.5 · 2026-10-19** — The hint inside the box is one bare sentence, `回车开启新会话` / `Press Enter to start a new session` — no parentheses, no `Search…` prefix — and it is now italic at `opacity: 0.7`, so it reads as a placeholder rather than content.
 - **v0.5.4 · 2026-10-19** — The quick-search box now aligns to the list column: the outer frame takes zero left inset and the host's `--dsh-session-list-edge-inset` on the right, so the box's left edge lines up with the session rows below and its right edge lines up with the 工作区 header controls (measured offset 0.0px); inside, both ends are still the same 22px icon slot (13px gutters each side). Before this it carried 8px on both sides, which pushed the left in and the right 4px past the list.
 - **v0.5.3 · 2026-10-19** — Quick-search style isolation: every rule for the box and its popups is scoped to this evaluation's own token, so a superseded bundle's stylesheet cannot restyle the box even when it is inserted later with equal specificity — verified by appending the 0.5.1 sheet last, gutters stayed 13px / 13px.
