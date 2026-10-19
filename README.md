@@ -10,13 +10,16 @@ Small interface improvements for the DSH Web chat. Each feature has its own swit
 
 **Targets the Web UI of [DeepSeek Harness 0.2.1-rc.1](https://github.com/deepseek-ai/deepseek-harness/releases/tag/dsh-v0.2.1-rc.1).**
 
-## New in 0.5.0 — search like a search engine
+## New in 0.5.0 — the "create a workspace first" step is gone
 
-A search box now lives under **Automated tasks** in the sidebar: type, press Enter, and you get exactly the session UI you already know — except this session files itself into a hidden workspace instead of your sidebar.
+You just want to look something up, and the price used to be: create a workspace, then invent a name for it. That step is gone. A search box now lives under **Automated tasks** in the sidebar: type, press Enter, and you get exactly the session UI you already know — except this session files itself into a hidden workspace instead of your sidebar.
 
+- **three clicks saved**: no new workspace, no name to invent, no directory to pick — just start asking or searching
 - magnifier on the left, a tiny model picker on the right (host default model unless you pick one)
 - the clock icon on the right is history: your last 50 searches, one click back to that session
 - the hidden workspace is `.dsh-ux-plus/search` under your home directory, created on first use and never shown in the sidebar
+
+![The search box sitting above the workspace list](docs/images/quick-search.png)
 
 [Details →](#workspace-quick-search)
 
@@ -34,7 +37,7 @@ The signals are independent and compose freely; plain whale when nothing is up. 
 
 | Feature | What it does | Preview |
 | --- | --- | --- |
-| Workspace quick search | A persistent sidebar search box: Enter opens an ordinary session, filed into a hidden workspace, with the last 50 searches kept in history. | — |
+| Workspace quick search | **Skips "create a workspace first"**: ask or search right away — Enter opens an ordinary session that files itself into a hidden workspace, with the last 50 searches kept in history. | <img src="docs/images/quick-search.png" width="200" alt="The search box pinned above the workspace list"> |
 | Attention favicon | The tab icon breathes while anything computes, turns green for finished-and-unread, blinks an orange dot while something awaits your click. | — |
 | Workspace recency order | What is live right now sits in one green-backed Active block with status dots; the history stays hidden below it behind the host's own "Expand N more sessions" button; idle workspaces collapse themselves and show their age on hover. | <img src="docs/images/recency-folded.png" width="200" alt="Active block with the expand button pinned below it"> |
 | Conversation typography | Pick a comfortable font size and reading width for the chat area — without zooming the whole interface. | <img src="docs/images/typography.png" width="300" alt="Chat area rendering"> |
@@ -46,7 +49,7 @@ The signals are independent and compose freely; plain whale when nothing is up. 
 
 ### Workspace quick search
 
-A search box sits permanently under **Automated tasks** in the sidebar and works like a search engine: type, press Enter, and a new session opens — the same UI as any other session.
+A search box sits permanently under **Automated tasks** in the sidebar and drops the "create a workspace first" step: ask or search right away — type, press Enter, and an ordinary session opens (same UI as any other session) while filing itself into a hidden workspace, out of your sidebar.
 
 ![The box sits above the workspace list: magnifier on the left, model and history icons on the right, one faint italic hint when empty](docs/images/quick-search.png)
 
@@ -148,6 +151,7 @@ npm run build   # tsdown emits lib/client.js (classic script, committed to the r
 
 The three most recent entries; full history in [CHANGELOG.md](CHANGELOG.md).
 
+- **v0.5.7 · 2026-10-19** — The docs now lead with the payoff: the intro section, the feature table and the feature section all open with "the create-a-workspace-first step is gone — ask or search right away", with the mechanics (Enter, hidden workspace) moved behind it; the feature table's Preview column carries the search-box screenshot instead of a dash. No code change.
 - **v0.5.6 · 2026-10-19** — The hint is now `直接搜，不用工作区` (`Just search, no workspace`): one clause for the action, one for "no workspace to set up first" — no parentheses, no mechanism words. The feature section also gained two screenshots (empty and typed state).
 - **v0.5.5 · 2026-10-19** — The hint inside the box is one bare sentence, `回车开启新会话` / `Press Enter to start a new session` — no parentheses, no `Search…` prefix — and it is now italic at `opacity: 0.7`, so it reads as a placeholder rather than content.
 - **v0.5.4 · 2026-10-19** — The quick-search box now aligns to the list column: the outer frame takes zero left inset and the host's `--dsh-session-list-edge-inset` on the right, so the box's left edge lines up with the session rows below and its right edge lines up with the 工作区 header controls (measured offset 0.0px); inside, both ends are still the same 22px icon slot (13px gutters each side). Before this it carried 8px on both sides, which pushed the left in and the right 4px past the list.

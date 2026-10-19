@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.5.7 — 2026-10-19
+
+- 文档重写为「先说卖点」：省掉「先建一个工作区」的交互成本——想到什么直接问、直接搜。首屏新增段、功能表行、功能详解三处开场同一句话，机制细节（回车、隐藏工作区）挪到卖点之后。
+- 功能表「预览」列补上 `docs/images/quick-search.png`，与其他已在表中带图的功能一致（此前这一行是 `—`）。
+- 英文 README 同步（`the "create a workspace first" step is gone`）。
+- 无代码变化。
+
 ## 0.5.6 — 2026-10-19
 
 - 提示语文案改为 `直接搜，不用工作区`（英文 `Just search, no workspace`），`placeholder` 与 `aria-label` 同源。
