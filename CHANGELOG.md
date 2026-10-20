@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.5.13 — 2026-10-20
+
+Docs only.
+
+- Both README update logs are sorted by version — strictly newest-first — again: the 0.5.8 through 0.5.12 bullets had been appended underneath 0.5.1 (the anchor for each edit was the first bullet it found, not the top of the list), which left the log reading 0.5.7 → 0.5.6 → … → 0.5.1 → 0.5.12 → … → 0.5.8 → 0.5.0.
+- The log intro no longer says "three most recent entries" (it lists fifteen); it now states the direction instead.
+- `npm test` 137/137, `npm run build` unchanged, no source or bundle change.
+
 ## 0.5.12 — 2026-10-20
 
 - The running ring (a 15px circle carrying the number of live search sessions) is replaced by a chat bubble: one 14px outline icon in the same 20px slot, no digits, so the glyph never changes shape or width under the pointer.
