@@ -51,13 +51,13 @@ The signals are independent and compose freely; plain whale when nothing is up. 
 
 A search box sits permanently under **Automated tasks** in the sidebar and drops the "create a workspace first" step: ask or search right away — type, press Enter, and an ordinary session opens (same UI as any other session) while filing itself into a hidden workspace, out of your sidebar.
 
-![The box sits above the workspace list: magnifier on the left, model, history and running-ring icons on the right, one faint italic hint when empty](docs/images/quick-search.png)
+![The box sits above the workspace list: magnifier on the left, model, history and session-bubble icons on the right, one faint italic hint when empty](docs/images/quick-search.png)
 
 | Element | Behaviour |
 | --- | --- |
 | Search box (magnifier on the left) | Enter searches straight away (the field is single-line); an Enter that ends an IME composition never submits by accident |
 | Model picker | A small chip icon on the right: click it for the model list (the current pick is ticked). Leave it alone to use the host default; a non-default pick puts a dot on the chip and is remembered locally |
-| Running ring (far right) | How many of your search sessions are running right now; a click always returns to the newest one, finished or not; dim and inert while there is no search session yet |
+| Session bubble (far right) | One click returns to the newest search session, finished or not. While a search is running a dot lights inside the bubble and breathes — never a number. Dim and inert while there is no search session yet |
 | Clock icon (right) | Opens history: the last 50 searches, one click reopens that session, one button clears the list |
 | Sidebar | Search sessions **never show up** — they all live in the hidden workspace |
 
@@ -65,11 +65,11 @@ A search box sits permanently under **Automated tasks** in the sidebar and drops
 - The box only appears while the sidebar is expanded; in the collapsed rail it steps aside.
 - Turning the switch off removes the hidden-workspace rule too — those sessions simply reappear in the sidebar, nothing is lost.
 
-Type a question in that box, the two icons on the right stay put, Enter opens an ordinary session:
+Type a question in that box, the icons on the right stay put, Enter opens an ordinary session:
 
 ![A question typed into the box, the three icons unchanged](docs/images/quick-search-typed.png)
 
-While a search is running, the right-hand ring lights up with the count; a click returns to the newest search session — finished or not.
+While a search is running, a dot lights up inside the right-hand bubble; a click returns to the newest search session — finished or not.
 
 ### Attention favicon
 
@@ -161,6 +161,7 @@ The three most recent entries; full history in [CHANGELOG.md](CHANGELOG.md).
 - **v0.5.3 · 2026-10-19** — Quick-search style isolation: every rule for the box and its popups is scoped to this evaluation's own token, so a superseded bundle's stylesheet cannot restyle the box even when it is inserted later with equal specificity — verified by appending the 0.5.1 sheet last, gutters stayed 13px / 13px.
 - **v0.5.2 · 2026-10-19** — Two quick-search fixes: the box now has strictly symmetric gutters (both ends are a 22px slot inside 8px padding, so the magnifier no longer sits closer to the edge than the right-hand icons), and a box left behind by a hot-replaced bundle instance no longer stacks under the new one — our nodes carry a per-evaluation token, so a stale marker is hidden instead of fought over.
 - **v0.5.1 · 2026-10-19** — Quick search polish: the model picker is now a small chip icon that opens a menu (a dot marks a non-default pick), the box contents are properly centred, and the box no longer needs `remote.$host.home` at mount — Enter searches as soon as the connection is ready.
+- **v0.5.12 · 2026-10-20** — The running ring became a chat bubble: no number any more, one click still returns to your newest search session, and a dot lights up and breathes inside it while a search runs (still under reduced motion). Both doc screenshots were redrawn with the new glyph.
 - **v0.5.11 · 2026-10-20** — The ring now means "my search sessions": it counts only sessions in the private search workspace, and a click always returns to the newest one — finished or still running — never to an ordinary sidebar session.
 - **v0.5.10 · 2026-10-20** — The running ring only counts what the sidebar would show: sessions in the private search workspace (including an unregistered one still running in it) no longer light it up or get opened by it.
 - **v0.5.9 · 2026-10-19** — Opening a session no longer fails silently: the ring (and the history list) try the host navigation service, then click the host row for that session, and report the reason in the box if both routes fail.

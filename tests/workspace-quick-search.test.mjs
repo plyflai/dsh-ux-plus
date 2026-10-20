@@ -441,11 +441,28 @@ test('mount inserts the box as the region first child and dispose removes every 
     assert.ok(/display: flex/.test(rowCss), 'field and ring share one row')
     assert.ok(/gap: 4px/.test(rowCss), 'the blank between the field and the ring is one gap')
     const runs = pick(rootNode, 'data-qs', 'runs')
-    assert.ok(runs, 'the box has a running-now column')
+    assert.ok(runs, 'the box has a back-to-my-search column')
+    assert.equal(String(runs.tagName), 'BUTTON', 'the bubble is a button, not a decorative span')
     assert.equal(runs.getAttribute('data-state'), 'idle', 'nothing is running at mount')
     assert.equal(runs.getAttribute('aria-disabled'), 'true')
-    assert.equal(runs.textContent, '', 'the idle ring carries no count')
+    assert.equal(runs.textContent, '', 'the bubble carries no count')
     assert.equal(runs.getAttribute('title'), '还没有搜索会话')
+    // One glyph, two states: the bubble outline is always there, the dot is a
+    // filled path CSS switches off while nothing runs.
+    const icon = runs.children[0]
+    assert.equal(icon.children.length, 2, 'the bubble and its dot share one svg')
+    const dot = icon.children[1]
+    assert.equal(dot.getAttribute('data-qs'), 'run-dot')
+    assert.equal(dot.getAttribute('fill'), 'currentColor', 'the dot is painted, not stroked')
+    assert.equal(dot.getAttribute('stroke'), 'none')
+    assert.ok(
+      sheet.includes('[data-qs="runs"][data-state="idle"] [data-qs="run-dot"] { display: none; }'),
+      'idle keeps the bubble and hides only the dot',
+    )
+    assert.ok(
+      /\[data-qs="runs"\]\[data-state="active"\] \{ color: var\(--dsw-alias-label-primary/.test(sheet),
+      'running lights the glyph up to the primary label color',
+    )
     assert.ok(fieldCss.includes('[data-ux-plus-instance]'), 'our geometry rules are instance-scoped, so a stale sheet cannot restyle them')
     // The sidebar region is inset asymmetrically; the box must flush with the list band,
     // so its left edge lines up with the rows and its right edge with the header controls.
@@ -483,7 +500,7 @@ test('mount inserts the box as the region first child and dispose removes every 
   }
 })
 
-test('the ring counts the running search sessions and always opens the newest one', async () => {
+test('the bubble lights up while a search runs and always opens the newest one', async () => {
   const env = makeEnv()
   installGlobals(env)
   try {
@@ -502,25 +519,24 @@ test('the ring counts the running search sessions and always opens the newest on
     ])
     env.flushTimers()
     assert.equal(runs.getAttribute('data-state'), 'active')
-    assert.equal(runs.textContent, '2', 'only the sessions this box started are counted')
-    assert.equal(runs.getAttribute('title'), '2 个搜索会话在跑 · 点击回到最近一个')
+    assert.equal(runs.textContent, '', 'the glyph never grows a number')
+    assert.equal(runs.getAttribute('title'), '打开最近的搜索会话：清理 Docker 缓存（正在运行）')
 
     // The jump is not gated on a live turn: it always lands on the newest search session.
     runs.dispatch('click', {})
     assert.deepEqual(calls.opened, ['s-a'], 'newest activity first')
 
-    // The newest one has finished: the count drops, the jump stays.
+    // The newest one has finished: the dot goes out, the jump stays.
     setSessions([
       { id: 's-a', running: false, displayTitle: '清理 Docker 缓存', updatedAt: 2_000 },
       { id: 's-b', running: true, displayTitle: '关于项目结构的讨论', updatedAt: 1_000 },
     ])
     env.flushTimers()
-    assert.equal(runs.getAttribute('data-state'), 'active')
-    assert.equal(runs.textContent, '1')
+    assert.equal(runs.getAttribute('data-state'), 'active', 'one of my searches is still running')
     runs.dispatch('click', {})
     assert.deepEqual(calls.opened, ['s-a', 's-a'], 'a finished session with the newest activity still opens')
 
-    // Nothing running at all: the ring dims, and a click still opens the newest.
+    // Nothing running at all: the bubble dims, and a click still opens the newest.
     setSessions([
       { id: 's-a', running: false, displayTitle: '清理 Docker 缓存', updatedAt: 2_000 },
       { id: 's-b', running: false, displayTitle: '关于项目结构的讨论', updatedAt: 5_000 },
@@ -753,7 +769,7 @@ test('a workspace that cannot be registered is reported and opens nothing', asyn
 // History popup.
 // ---------------------------------------------------------------------------
 
-test('the ring opens the newest search session, never a workspace session', async () => {
+test('the bubble opens the newest search session, never a workspace session', async () => {
   const env = makeEnv()
   installGlobals(env)
   try {
@@ -768,7 +784,7 @@ test('the ring opens the newest search session, never a workspace session', asyn
       { id: 's-mine', running: true, displayTitle: '我的会话', updatedAt: 3_000 },
     ])
     env.flushTimers()
-    assert.equal(runs.textContent, '1', 'a workspace session is not what this ring counts')
+    assert.equal(runs.getAttribute('data-state'), 'active', 'only a session this box owns lights the dot')
     runs.dispatch('click', {})
     assert.deepEqual(calls.opened, ['s-owned'], 'never a session the box did not start')
 

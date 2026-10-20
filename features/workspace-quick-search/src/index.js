@@ -82,7 +82,7 @@ const MESSAGES = {
     promptFailed: '发送失败',
     ringEmpty: '还没有搜索会话',
     ringOpen: '打开最近的搜索会话：{title}',
-    ringRunning: '{n} 个搜索会话在跑 · 点击回到最近一个',
+    ringOpenLive: '打开最近的搜索会话：{title}（正在运行）',
     untitled: '未命名会话',
     openFailed: '打不开这个会话：{reason}',
     openService: '没有找到宿主的会话导航服务',
@@ -107,7 +107,7 @@ const MESSAGES = {
     promptFailed: 'Could not send the prompt',
     ringEmpty: 'No search session yet',
     ringOpen: 'Open the latest search session: {title}',
-    ringRunning: '{n} search sessions running - back to the latest',
+    ringOpenLive: 'Open the latest search session: {title} (running)',
     untitled: 'Untitled session',
     openFailed: 'Could not open this session: {reason}',
     openService: 'The host session navigation service is unavailable',
@@ -346,8 +346,16 @@ function svgIcon(doc, paths, size) {
   root.setAttribute('aria-hidden', 'true')
   root.setAttribute('focusable', 'false')
   for (const path of paths) {
+    // A string is a stroked outline; `{ d, fill }` paints a solid shape (the dot
+    // inside the bubble), and `qs` marks the part CSS may switch off.
+    const spec = typeof path === 'string' ? { d: path } : path
     const node = make('path')
-    node.setAttribute('d', path)
+    node.setAttribute('d', spec.d)
+    if (spec.fill === true) {
+      node.setAttribute('fill', 'currentColor')
+      node.setAttribute('stroke', 'none')
+    }
+    if (typeof spec.qs === 'string' && spec.qs !== '') node.setAttribute('data-qs', spec.qs)
     root.appendChild(node)
   }
   return root
@@ -366,6 +374,16 @@ const MODEL_PATHS = [
   'M6.6 2.6v2.6M9.4 2.6v2.6M6.6 10.8v2.6M9.4 10.8v2.6',
   'M2.6 6.6h2.6M2.6 9.4h2.6M10.8 6.6h2.6M10.8 9.4h2.6',
 ]
+/**
+ * Chat bubble: the way back to the session the last search opened. One glyph
+ * carries both states — the bubble alone means "a session", the dot it gains
+ * while a search is running means "that one is still working".
+ */
+const BUBBLE_PATHS = [
+  'M3.9 2.9h8.2a1.8 1.8 0 0 1 1.8 1.8v4.8a1.8 1.8 0 0 1-1.8 1.8H7.5L4.3 14v-2.7H3.9a1.8 1.8 0 0 1-1.8-1.8V4.7a1.8 1.8 0 0 1 1.8-1.8z',
+]
+/** The dot inside the bubble: filled, and hidden while nothing is running. */
+const BUBBLE_DOT = { d: 'M8 5.15a1.75 1.75 0 1 0 0 3.5 1.75 1.75 0 0 0 0-3.5', fill: true, qs: 'run-dot' }
 
 /** Stylesheet for the box and its popup (authored text: no hashed class names). */
 function boxCss() {
@@ -413,18 +431,19 @@ function boxCss() {
       + ' color: var(--dsw-alias-label-secondary, #9aa0ab); cursor: pointer; }',
     `${scope} [data-qs="history"]:hover { color: var(--dsw-alias-label-primary, #e8e8e8);`
       + ' background: var(--dsw-alias-interactive-bg-hover, rgba(128, 128, 128, 0.12)); }',
-    // Running now: a 20px hit area holding a 15px ring; the count is the ring's
-    // text, so one node owns both the glyph and the number. Idle keeps the ring
-    // (so the column never moves) and drops contrast to a quiet outline.
-    `${scope} [data-qs="runs"] { flex: 0 0 auto; position: relative; display: inline-flex; align-items: center;`
-      + ' justify-content: center; width: 20px; height: 20px; padding: 0; border: none; border-radius: 6px;'
-      + ' background: transparent; color: var(--dsw-alias-label-primary, #e8e8e8); font: inherit; font-size: 9.5px;'
-      + ' font-weight: 600; font-variant-numeric: tabular-nums; line-height: 1; cursor: pointer; }',
-    `${scope} [data-qs="runs"]::before { content: ""; position: absolute; left: 50%; top: 50%; width: 15px; height: 15px;`
-      + ' margin: -7.5px 0 0 -7.5px; box-sizing: border-box; border: 1.4px solid currentColor; border-radius: 50%; }',
+    // Back to my last search: a 20px hit area holding a 14px chat bubble. Idle is
+    // the quiet outline with the dot switched off; running is the same bubble with
+    // the dot lit, so the glyph never changes shape under the pointer.
+    `${scope} [data-qs="runs"] { flex: 0 0 auto; display: inline-flex; align-items: center; justify-content: center;`
+      + ' width: 20px; height: 20px; padding: 0; border: none; border-radius: 6px; background: transparent;'
+      + ' color: var(--dsw-alias-label-secondary, #9aa0ab); line-height: 0; cursor: pointer; }',
     `${scope} [data-qs="runs"]:hover { background: var(--dsw-alias-interactive-bg-hover, rgba(128, 128, 128, 0.12)); }`,
     `${scope} [data-qs="runs"][data-state="idle"] { color: var(--dsw-alias-label-tertiary, #6b7180); }`,
-    `${scope} [data-qs="runs"][data-state="idle"]::before { opacity: 0.55; }`,
+    `${scope} [data-qs="runs"][data-state="idle"] [data-qs="run-dot"] { display: none; }`,
+    `${scope} [data-qs="runs"][data-state="active"] { color: var(--dsw-alias-label-primary, #e8e8e8); }`,
+    `${scope} [data-qs="runs"][data-state="active"] [data-qs="run-dot"] { animation: ux-plus-qs-blink 1.9s ease-in-out infinite; }`,
+    `@keyframes ux-plus-qs-blink { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }`,
+    `@media (prefers-reduced-motion: reduce) { ${scope} [data-qs="runs"][data-state="active"] [data-qs="run-dot"] { animation: none; } }`,
     `${scope} [data-qs="runs"][aria-disabled="true"] { cursor: default; }`,
     `${scope} [data-qs="runs"][aria-disabled="true"]:hover { background: transparent; }`,
     `${scope} [data-qs="status"] { font-size: 11px; line-height: 14px; color: #e5534b; }`,
@@ -640,6 +659,7 @@ export function client(ctx, deps) {
     history.appendChild(svgIcon(document, CLOCK_PATHS, 14))
     // Outside the field, in the blank the field gives up on its right.
     const runs = el('button', { 'data-qs': 'runs', type: 'button', 'data-state': 'idle', 'aria-disabled': 'true' })
+    runs.appendChild(svgIcon(document, [...BUBBLE_PATHS, BUBBLE_DOT], 14))
     const status = el('div', { 'data-qs': 'status', role: 'status' })
     field.appendChild(glass)
     field.appendChild(input)
@@ -1079,10 +1099,10 @@ export function client(ctx, deps) {
   }
 
   /**
-   * The ring answers one question: where did my searching go. Its number is how
-   * many of those sessions are running, and a click opens the newest one whether
-   * it is still running or has long finished — gating the jump on a live turn
-   * would strand the user the moment the answer arrives.
+   * The bubble answers one question: where did my searching go. A click opens the
+   * newest search session whether it is still running or has long finished —
+   * gating the jump on a live turn would strand the user the moment the answer
+   * arrives. The only thing the running state changes is the lit dot.
    */
   function readSearches() {
     const snapshot = snapshotOf(deps && deps.sessions && deps.sessions.list)
@@ -1100,8 +1120,8 @@ export function client(ctx, deps) {
   }
 
   /**
-   * Re-read the list and repaint the ring. Idempotent on purpose: the scheduled
-   * pass runs on every DOM mutation, and an unchanged ring must not write to the
+   * Re-read the list and repaint the bubble. Idempotent on purpose: the scheduled
+   * pass runs on every DOM mutation, and an unchanged glyph must not write to the
    * node (which would schedule another pass).
    */
   function refreshRing() {
@@ -1110,15 +1130,15 @@ export function client(ctx, deps) {
     state.latest = read.latest
     const button = refs.runs
     if (button === null) return
-    const count = read.running === 0 ? '' : read.running > 9 ? '9+' : String(read.running)
-    if (button.textContent !== count) button.textContent = count
     const mode = read.running === 0 ? 'idle' : 'active'
     if (button.getAttribute('data-state') !== mode) button.setAttribute('data-state', mode)
     const disabled = read.latest === null ? 'true' : 'false'
     if (button.getAttribute('aria-disabled') !== disabled) button.setAttribute('aria-disabled', disabled)
     let label = t('ringEmpty')
     if (read.latest !== null) {
-      label = read.running === 0 ? t('ringOpen', { title: read.latest.title }) : t('ringRunning', { n: read.running })
+      label = read.running === 0
+        ? t('ringOpen', { title: read.latest.title })
+        : t('ringOpenLive', { title: read.latest.title })
     }
     if (button.getAttribute('title') !== label) {
       button.setAttribute('title', label)

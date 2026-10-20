@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.5.12 — 2026-10-20
+
+- The running ring (a 15px circle carrying the number of live search sessions) is replaced by a chat bubble: one 14px outline icon in the same 20px slot, no digits, so the glyph never changes shape or width under the pointer.
+- Both states come from one node: the bubble outline is always drawn, the filled dot (`data-qs="run-dot"`) is hidden while nothing runs and blinks gently (`ux-plus-qs-blink`, disabled under `prefers-reduced-motion: reduce`) while a search is live. `data-state` still drives the color — tertiary when idle, primary while running.
+- A click is unchanged in meaning: it opens the newest session this box started, running or not. The tooltip/aria-label now reads `打开最近的搜索会话：<title>` (plus `（正在运行）` when that session is live) instead of a count.
+- `svgIcon()` accepts `{ d, fill, qs }` path specs besides plain strings, so a solid shape and a switchable part can live in the same icon.
+- Tests 137/137: the mount case asserts the button/glyph shape, the painted dot and the idle:display-none rule; the behaviour case asserts state + tooltip instead of a count.
+- Docs: the feature table row, the paragraph under the typed screenshot and both screenshots were redrawn for the bubble.
+
 ## 0.5.11 — 2026-10-20
 
 - 运行环语义改为「我的搜索会话」：候选来源 = 搜索专用工作区的 `sessionIds` + 本实例刚创建还没登记的（`state.extraHidden`）+ 本地历史里的 sessionId，按 `updatedAt` 从新到旧排序；环上的数字 = 其中正在跑的条数（子代理不计）。
