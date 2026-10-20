@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.5.14 — 2026-10-21
+
+Docs only, no source or bundle change.
+
+- The Features / 功能 table is rewritten: every one of the seven rows now carries its complete interaction detail as bullets — where the control lives, how it triggers, what states you see, how a failure reads, and what switching the feature off leaves behind.
+- Two behaviours that only existed in code are now documented: the newest session floats to the top of its block, and a workspace with running or waiting members moves up to "now".
+- Wording checked against the implementation: the quick-search model list is flat with `provider · model` on each row (not grouped), and the two session-menu items register at order 50 and 60, ahead of the host's pin (100) and rename (200).
+- Both update logs gained the v0.5.14 bullet and dropped v0.5.9, keeping five entries newest-first.
+
 ## 0.5.13 — 2026-10-20
 
 Docs only.
