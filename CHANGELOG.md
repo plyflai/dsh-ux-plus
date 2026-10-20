@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.5.16 — 2026-10-21
+
+Docs only, no source or bundle change.
+
+- 功能表里的预览图从 markdown `![](…)` 换成带 `width="170"` 的 `<img>`，预览列不再按图片原始宽度（560px）撑开。
+- 量到的效果（GitHub 的 markdown 样式 + 1012px 容器，headless Chrome 实测）：中间列 270px → 575px，预览列 536px → 160px，表宽不变。
+- 只改表格里的 5 张图；「功能详解」里的整幅截图保持原尺寸。
+- 两个更新记录各 +1 行（0.5.16）、−1 行（0.5.11）。
+
 ## 0.5.15 — 2026-10-21
 
 Docs only, no source or bundle change.
