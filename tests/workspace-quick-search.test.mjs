@@ -81,6 +81,7 @@ function node(tag) {
     if (index !== -1) list.splice(index, 1)
   }
   el.dispatch = (type, event) => { for (const fn of el.listeners[type] || []) fn(event) }
+  el.click = () => { el.clicked = (el.clicked || 0) + 1; el.dispatch('click', {}) }
   el.getBoundingClientRect = () => ({ left: 0, top: 0, right: 240, bottom: 40, width: 240, height: 40 })
   el.focus = () => { el.focused = true }
   return el
@@ -132,6 +133,14 @@ function makeEnv(options = {}) {
     head: node('head'),
     createElement: (tag) => node(tag),
     querySelector: (selector) => {
+      const rowKey = /^\[data-row-key="session:(.+)"\]$/.exec(selector)
+      if (rowKey !== null) {
+        let hit = null
+        walk(env.document.body, (el) => {
+          if (hit === null && typeof el.getAttribute === 'function' && el.getAttribute('data-row-key') === `session:${rowKey[1]}`) hit = el
+        })
+        return hit
+      }
       if (env.sidebar === null) return null
       return selector === '[role="tree"]' ? env.sidebar.tree : null
     },
@@ -222,6 +231,7 @@ function makeCtx(options = {}) {
     promptFails: options.promptFails === true,
     workspaceFails: options.workspaceFails === true,
   }
+  const navigate = options.navigate === undefined ? 'service' : options.navigate
   const ctx = {
     remote: {
       $host: { home: options.home === undefined ? HOME : options.home },
@@ -241,7 +251,12 @@ function makeCtx(options = {}) {
       getSnapshot: () => ({ active: options.locale === undefined ? 'zh' : options.locale }),
       subscribe: () => () => {},
     },
-    get: (name) => (name === 'uiWorkspace' ? { openSession: (id) => calls.opened.push(id) } : undefined),
+    get: (name) => {
+      if (name !== 'uiWorkspace') return undefined
+      if (navigate === 'none') return undefined
+      if (navigate === 'throws') return { openSession: () => { throw new Error('navigation refused') } }
+      return { openSession: (id) => calls.opened.push(id) }
+    },
   }
   return { ctx, calls, state }
 }
@@ -743,6 +758,52 @@ test('a workspace that cannot be registered is reported and opens nothing', asyn
 // ---------------------------------------------------------------------------
 // History popup.
 // ---------------------------------------------------------------------------
+
+test('a refused navigation falls back to clicking the host row for that session', async () => {
+  const env = makeEnv()
+  installGlobals(env)
+  try {
+    const { ctx } = makeCtx({ navigate: 'throws' })
+    const { deps, setSessions } = makeDeps()
+    const { rootNode } = await mount(env, ctx, deps)
+    setSessions([{ id: 's-b', running: true, displayTitle: '关于项目结构的讨论', updatedAt: 1_000 }])
+    env.flushTimers()
+
+    // The host keeps its own row in the tree; clicking it is the host's navigation.
+    const hostRow = node('div')
+    hostRow.setAttribute('data-row-key', 'session:s-b')
+    const clicked = []
+    hostRow.addEventListener('click', () => clicked.push('s-b'))
+    env.document.body.appendChild(hostRow)
+
+    pick(rootNode, 'data-qs', 'runs').dispatch('click', {})
+    assert.deepEqual(clicked, ['s-b'], 'the fallback row was clicked')
+    const status = pick(rootNode, 'data-qs', 'status')
+    assert.notEqual(status.getAttribute('data-qs-state'), 'error', 'the fallback worked, so nothing is reported')
+    assert.equal(status.textContent, '')
+  } finally {
+    uninstallGlobals(env)
+  }
+})
+
+test('a navigation that cannot happen is reported in the box, never swallowed', async () => {
+  const env = makeEnv()
+  installGlobals(env)
+  try {
+    const { ctx } = makeCtx({ navigate: 'none' })
+    const { deps, setSessions } = makeDeps()
+    const { rootNode } = await mount(env, ctx, deps)
+    setSessions([{ id: 's-b', running: true, displayTitle: '关于项目结构的讨论', updatedAt: 1_000 }])
+    env.flushTimers()
+
+    const status = pick(rootNode, 'data-qs', 'status')
+    pick(rootNode, 'data-qs', 'runs').dispatch('click', {})
+    assert.equal(status.getAttribute('data-qs-state'), 'error')
+    assert.match(status.textContent, /打不开这个会话/, 'the reason is visible instead of a click that does nothing')
+  } finally {
+    uninstallGlobals(env)
+  }
+})
 
 test('the history icon lists the last searches and reopens one', async () => {
   const env = makeEnv()

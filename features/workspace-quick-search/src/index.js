@@ -84,6 +84,8 @@ const MESSAGES = {
     runningCount: '{n} 个会话正在运行',
     runningTitle: '正在运行 · {n}',
     untitled: '未命名会话',
+    openFailed: '打不开这个会话：{reason}',
+    openService: '没有找到宿主的会话导航服务',
     now: '刚刚',
     minutes: '{n} 分钟前',
     hours: '{n} 小时前',
@@ -107,6 +109,8 @@ const MESSAGES = {
     runningCount: '{n} running',
     runningTitle: 'Running · {n}',
     untitled: 'Untitled session',
+    openFailed: 'Could not open this session: {reason}',
+    openService: 'The host session navigation service is unavailable',
     now: 'just now',
     minutes: '{n} min ago',
     hours: '{n} h ago',
@@ -1105,11 +1109,48 @@ export function client(ctx, deps) {
     if (n < 2 && popup !== null && popupKind === 'running') closePanel()
   }
 
-  /** Open one session in the main view (the one navigation the host exposes). */
+  /**
+   * Open one session in the main view. Two routes: the navigation service the
+   * Workspace plugin provides, then a click on the host's own row for that
+   * session (the host owns that navigation either way). A click that does
+   * nothing is the one outcome the box must not produce silently, so the
+   * remaining failure is reported in place.
+   */
   function openSessionById(sessionId) {
     closePanel()
-    const uiWorkspace = typeof ctx.get === 'function' ? ctx.get('uiWorkspace') : undefined
-    if (uiWorkspace && typeof uiWorkspace.openSession === 'function') uiWorkspace.openSession(sessionId)
+    const failure = navigateTo(sessionId)
+    if (failure === null) return
+    if (clickHostRow(sessionId)) return
+    setStatus('error', t('openFailed', { reason: failure }))
+  }
+
+  /**
+   * The service route.
+   *
+   * @returns null when the host opened the session, else the reason it did not.
+   */
+  function navigateTo(sessionId) {
+    const uiWorkspace = ctx && typeof ctx.get === 'function' ? ctx.get('uiWorkspace') : undefined
+    if (!uiWorkspace || typeof uiWorkspace.openSession !== 'function') return t('openService')
+    try {
+      uiWorkspace.openSession(sessionId)
+      return null
+    } catch (error) {
+      return error && error.message ? String(error.message) : t('openService')
+    }
+  }
+
+  /**
+   * The row route: the host row for a session navigates when clicked.
+   *
+   * @returns whether a row was found and clicked.
+   */
+  function clickHostRow(sessionId) {
+    if (typeof document.querySelector !== 'function') return false
+    const row = document.querySelector(`[data-row-key="session:${sessionId}"]`)
+    if (row === null || row === undefined || typeof row.click !== 'function') return false
+    row.click()
+    return true
   }
 
   /** One click: nothing to open, the only running session, or the list. */
