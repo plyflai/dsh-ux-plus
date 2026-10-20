@@ -51,7 +51,7 @@ The signals are independent and compose freely; plain whale when nothing is up. 
 
 A search box sits permanently under **Automated tasks** in the sidebar and drops the "create a workspace first" step: ask or search right away — type, press Enter, and an ordinary session opens (same UI as any other session) while filing itself into a hidden workspace, out of your sidebar.
 
-![The box sits above the workspace list: magnifier on the left, model and history icons on the right, one faint italic hint when empty](docs/images/quick-search.png)
+![The box sits above the workspace list: magnifier on the left, model, history and running-ring icons on the right, one faint italic hint when empty](docs/images/quick-search.png)
 
 | Element | Behaviour |
 | --- | --- |
@@ -67,7 +67,11 @@ A search box sits permanently under **Automated tasks** in the sidebar and drops
 
 Type a question in that box, the two icons on the right stay put, Enter opens an ordinary session:
 
-![A question typed into the box, the model and history icons unchanged](docs/images/quick-search-typed.png)
+![A question typed into the box, the three icons unchanged](docs/images/quick-search-typed.png)
+
+When sessions are running, the right-hand ring lights up with their count; with two or more, a click opens this list and a row jumps to that session:
+
+![The ring shows 3; opened, it lists three running sessions with their titles and ages](docs/images/quick-search-running.png)
 
 ### Attention favicon
 
