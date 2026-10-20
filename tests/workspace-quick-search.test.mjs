@@ -759,6 +759,37 @@ test('a workspace that cannot be registered is reported and opens nothing', asyn
 // History popup.
 // ---------------------------------------------------------------------------
 
+test('the running ring ignores the private search workspace', async () => {
+  const env = makeEnv()
+  installGlobals(env)
+  try {
+    const { ctx, calls } = makeCtx()
+    const searchView = { workspaceId: 'ws-search', path: WORKSPACE_PATH, title: 'search', sessionIds: ['s-owned'] }
+    const { deps, setSessions } = makeDeps({ items: [searchView] })
+    const { rootNode } = await mount(env, ctx, deps)
+    const runs = pick(rootNode, 'data-qs', 'runs')
+
+    setSessions([
+      { id: 's-owned', running: true, displayTitle: '搜索会话', updatedAt: 3_000 },
+      { id: 's-cwd', running: true, displayTitle: '还没登记进工作区的搜索会话', cwd: WORKSPACE_PATH, updatedAt: 2_000 },
+      { id: 's-mine', running: true, displayTitle: '我的会话', updatedAt: 1_000 },
+    ])
+    env.flushTimers()
+    assert.equal(runs.textContent, '1', 'the search session is not something the user can see, so it is not counted')
+    runs.dispatch('click', {})
+    assert.deepEqual(calls.opened, ['s-mine'], 'and a click opens that one, never a search session')
+
+    // Only search work running: the ring stays idle, so no click can land in the hidden workspace.
+    setSessions([{ id: 's-owned', running: true, displayTitle: '搜索会话', updatedAt: 3_000 }])
+    env.flushTimers()
+    assert.equal(runs.getAttribute('data-state'), 'idle')
+    runs.dispatch('click', {})
+    assert.deepEqual(calls.opened, ['s-mine'])
+  } finally {
+    uninstallGlobals(env)
+  }
+})
+
 test('a refused navigation falls back to clicking the host row for that session', async () => {
   const env = makeEnv()
   installGlobals(env)
