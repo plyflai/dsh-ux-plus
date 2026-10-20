@@ -252,8 +252,19 @@ function makeDeps(options = {}) {
   // The host keeps the session list in step with `create`; the fakes do too, so
   // the history's liveness check sees the sessions it lists.
   const ids = []
-  const sessions = makeList({ phase: 'ready', ids, byId: {} })
+  const byId = {}
+  const sessions = makeList({ phase: 'ready', ids, byId })
   const workspaces = makeList({ phase: 'ready', items: options.items || [] })
+  /** Replace the whole session list: what the host pushes when sessions start or stop. */
+  const setSessions = (entries) => {
+    for (const key of Object.keys(byId)) delete byId[key]
+    ids.length = 0
+    for (const entry of entries || []) {
+      ids.push(entry.id)
+      byId[entry.id] = entry
+    }
+    sessions.set({ phase: 'ready', ids: [...ids], byId: { ...byId } })
+  }
   const deps = {
     sessions: {
       list: sessions,
@@ -261,7 +272,8 @@ function makeDeps(options = {}) {
         calls.create.push(input)
         const sessionId = options.sessionId === undefined ? 'session-1' : options.sessionId
         ids.push(sessionId)
-        sessions.set({ phase: 'ready', ids, byId: {} })
+        byId[sessionId] = { id: sessionId, running: true, displayTitle: '查询', updatedAt: Date.now() }
+        sessions.set({ phase: 'ready', ids: [...ids], byId: { ...byId } })
         return sessionId
       },
     },
@@ -276,7 +288,7 @@ function makeDeps(options = {}) {
       },
     },
   }
-  return { deps, calls, sessions, workspaces }
+  return { deps, calls, sessions, workspaces, setSessions }
 }
 
 /** Mount the feature and hand back the box's pieces. */
@@ -404,10 +416,21 @@ test('mount inserts the box as the region first child and dispose removes every 
       return hit || ''
     }
     const fieldCss = rule('[data-qs="field"] {')
-    assert.ok(/padding: 0 8px/.test(fieldCss), 'the row insets both ends by the same amount')
+    assert.ok(/padding: 0 6px/.test(fieldCss), 'the field insets both ends by the same amount')
     const slotWidth = (sel) => (/width: (\d+)px/.exec(rule(sel)) || [])[1]
     assert.equal(slotWidth('[data-qs="glass"]'), slotWidth('[data-qs="history"]'), 'left icon and right icon share one slot width')
     assert.equal(slotWidth('[data-qs="glass"]'), slotWidth('[data-qs="model"]'), 'left slot matches the model slot too')
+    // The running ring sits OUTSIDE the field, in the blank the field gives up.
+    assert.equal(slotWidth('[data-qs="runs"]'), '20', 'the ring gets its own smaller column')
+    const rowCss = rule('[data-qs="row"] {')
+    assert.ok(/display: flex/.test(rowCss), 'field and ring share one row')
+    assert.ok(/gap: 4px/.test(rowCss), 'the blank between the field and the ring is one gap')
+    const runs = pick(rootNode, 'data-qs', 'runs')
+    assert.ok(runs, 'the box has a running-now column')
+    assert.equal(runs.getAttribute('data-state'), 'idle', 'nothing is running at mount')
+    assert.equal(runs.getAttribute('aria-disabled'), 'true')
+    assert.equal(runs.textContent, '', 'the idle ring carries no count')
+    assert.equal(runs.getAttribute('title'), '没有会话在运行')
     assert.ok(fieldCss.includes('[data-ux-plus-instance]'), 'our geometry rules are instance-scoped, so a stale sheet cannot restyle them')
     // The sidebar region is inset asymmetrically; the box must flush with the list band,
     // so its left edge lines up with the rows and its right edge with the header controls.
@@ -440,6 +463,75 @@ test('mount inserts the box as the region first child and dispose removes every 
     assert.equal(workspaces.subscribeCount(), 0)
     dispose()
     assert.equal(env.document.head.children.length, 0, 'double dispose is a no-op')
+  } finally {
+    uninstallGlobals(env)
+  }
+})
+
+test('the running ring counts live sessions, jumps when there is one, lists when there are more', async () => {
+  const env = makeEnv()
+  installGlobals(env)
+  try {
+    const { ctx, calls } = makeCtx()
+    const { deps, setSessions } = makeDeps()
+    const { rootNode } = await mount(env, ctx, deps)
+    const runs = pick(rootNode, 'data-qs', 'runs')
+    const panel = () => env.document.body.children.find((el) => el.getAttribute('data-dsh-ux-plus') === 'quick-search-history') || null
+
+    // Two top-level sessions run, one subagent session runs, one session is idle.
+    setSessions([
+      { id: 's-a', running: true, displayTitle: '清理 Docker 缓存', updatedAt: 2_000 },
+      { id: 's-b', running: true, displayTitle: '关于项目结构的讨论', updatedAt: 1_000 },
+      { id: 's-sub', running: true, origin: 'subagent', displayTitle: 'child', updatedAt: 3_000 },
+      { id: 's-c', running: false, displayTitle: 'idle one', updatedAt: 4_000 },
+    ])
+    env.flushTimers()
+    assert.equal(runs.getAttribute('data-state'), 'active')
+    assert.equal(runs.getAttribute('aria-disabled'), 'false')
+    assert.equal(runs.textContent, '2', 'a subagent session is the parent work, not a row of its own')
+    assert.equal(runs.getAttribute('title'), '2 个会话正在运行')
+
+    runs.dispatch('click', {})
+    const list = panel()
+    assert.ok(list, 'two sessions open the list')
+    const rows = collect(list, (el) => el.getAttribute('data-qs') === 'run-row')
+    assert.deepEqual(
+      rows.map((row) => pick(row, 'data-qs', 'run-title').textContent),
+      ['清理 Docker 缓存', '关于项目结构的讨论'],
+      'newest activity first',
+    )
+    rows[1].dispatch('click', {})
+    assert.deepEqual(calls.opened, ['s-b'], 'a row opens that session')
+    assert.equal(panel(), null, 'and closes the list')
+
+    // Down to one: a click goes straight there, no list in the way.
+    setSessions([{ id: 's-b', running: true, displayTitle: '关于项目结构的讨论', updatedAt: 1_000 }])
+    env.flushTimers()
+    assert.equal(runs.textContent, '1')
+    runs.dispatch('click', {})
+    assert.deepEqual(calls.opened, ['s-b', 's-b'])
+    assert.equal(panel(), null)
+
+    // An open list closes itself when the second session stops (nothing left to list).
+    setSessions([
+      { id: 's-a', running: true, displayTitle: '甲', updatedAt: 2_000 },
+      { id: 's-b', running: true, displayTitle: '乙', updatedAt: 1_000 },
+    ])
+    env.flushTimers()
+    runs.dispatch('click', {})
+    assert.ok(panel())
+    setSessions([{ id: 's-a', running: true, displayTitle: '甲', updatedAt: 2_000 }])
+    env.flushTimers()
+    assert.equal(panel(), null, 'a list of two has nothing left to list once one stops')
+
+    // Nothing running: the ring empties and a click does nothing.
+    setSessions([])
+    env.flushTimers()
+    assert.equal(runs.getAttribute('data-state'), 'idle')
+    assert.equal(runs.textContent, '')
+    assert.equal(runs.getAttribute('title'), '没有会话在运行')
+    runs.dispatch('click', {})
+    assert.deepEqual(calls.opened, ['s-b', 's-b'], 'idle clicks open nothing')
   } finally {
     uninstallGlobals(env)
   }

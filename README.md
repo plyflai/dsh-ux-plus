@@ -57,6 +57,7 @@ A search box sits permanently under **Automated tasks** in the sidebar and drops
 | --- | --- |
 | Search box (magnifier on the left) | Enter searches straight away (the field is single-line); an Enter that ends an IME composition never submits by accident |
 | Model picker | A small chip icon on the right: click it for the model list (the current pick is ticked). Leave it alone to use the host default; a non-default pick puts a dot on the chip and is remembered locally |
+| Running ring (far right) | How many sessions are running right now: dim and inert at 0, a click jumps to the only one, a click on 2+ opens a list to pick from (title + age). Top-level sessions only — subagents count as their parent |
 | Clock icon (right) | Opens history: the last 50 searches, one click reopens that session, one button clears the list |
 | Sidebar | Search sessions **never show up** — they all live in the hidden workspace |
 
@@ -158,6 +159,7 @@ The three most recent entries; full history in [CHANGELOG.md](CHANGELOG.md).
 - **v0.5.3 · 2026-10-19** — Quick-search style isolation: every rule for the box and its popups is scoped to this evaluation's own token, so a superseded bundle's stylesheet cannot restyle the box even when it is inserted later with equal specificity — verified by appending the 0.5.1 sheet last, gutters stayed 13px / 13px.
 - **v0.5.2 · 2026-10-19** — Two quick-search fixes: the box now has strictly symmetric gutters (both ends are a 22px slot inside 8px padding, so the magnifier no longer sits closer to the edge than the right-hand icons), and a box left behind by a hot-replaced bundle instance no longer stacks under the new one — our nodes carry a per-evaluation token, so a stale marker is hidden instead of fought over.
 - **v0.5.1 · 2026-10-19** — Quick search polish: the model picker is now a small chip icon that opens a menu (a dot marks a non-default pick), the box contents are properly centred, and the box no longer needs `remote.$host.home` at mount — Enter searches as soon as the connection is ready.
+- **v0.5.8 · 2026-10-19** — A "running now" ring joins the right end of the search box: it counts live sessions, jumps straight to the only one, opens a picker for several. The box narrows by 24px; the hint still fits.
 - **v0.5.0 · 2026-10-19** — New "Workspace quick search": a persistent sidebar box opens an ordinary session on Enter (with a minimal model picker). Those sessions are filed into the hidden workspace `.dsh-ux-plus/search`, and the clock icon reopens the last 50 searches.
 - **v0.4.5 · 2026-10-18** — Icon is now a die-cut sticker: no background tile, just the whale and the UX+ mark with a white edge tracing the combined silhouette (the mark keeps its own halo). No behaviour change.
 - **v0.4.4 · 2026-10-18** — Icon polish: the white edge now frames the whole tile instead of outlining the UX+ letters; the inline README icon grows to 44px. No behaviour change.

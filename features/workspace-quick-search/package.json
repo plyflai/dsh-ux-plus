@@ -1,6 +1,6 @@
 {
   "name": "@dsh-ux-plus/workspace-quick-search",
-  "version": "0.5.7",
+  "version": "0.5.8",
   "private": true,
   "description": "Search box above the workspace list: Enter opens a normal session in a private background workspace the sidebar never lists, with a 50-entry history popup. (private sub-package of dsh-ux-plus: inlined into the package build, never published or installed as a row of its own.)",
   "type": "module",
