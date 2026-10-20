@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.5.11 — 2026-10-20
+
+- 运行环语义改为「我的搜索会话」：候选来源 = 搜索专用工作区的 `sessionIds` + 本实例刚创建还没登记的（`state.extraHidden`）+ 本地历史里的 sessionId，按 `updatedAt` 从新到旧排序；环上的数字 = 其中正在跑的条数（子代理不计）。
+- 点击永远打开最新那条，**不再以「是否正在跑」为条件**——答案出来了、会话停了，这一下依旧回得去；0.5.10 把搜索会话整个排除在环外，点下去落在侧边栏的普通会话上。
+- 移除 0.5.8 的「2 个以上点开列表」面板（`openRunningPanel`）及其样式与文案；`onRunsClick()` 现在只有一条路径。
+- 文案：`runningNone/runningCount/runningTitle` → `ringEmpty/ringOpen/ringRunning`；空态「还没有搜索会话」，有待回会话时「打开最近的搜索会话：<标题>」，有在跑时「{n} 个搜索会话在跑 · 点击回到最近一个」。
+- 样式：`cursor: default` 从 `data-state="idle"` 挪到 `aria-disabled="true"`，因此压暗但仍然可点。
+- 文档：中英文运行环说明改写；`docs/images/quick-search-running.png` 不再引用（列表已不存在）。
+- 测试：两条用例按新语义重写（计数 + 永远回最新 / 只回搜索会话不回普通会话），导航退路用例改为挂在搜索会话上；`tests/workspace-quick-search.test.mjs` 21 条全过，全套 137 条全过。
+
 ## 0.5.10 — 2026-10-20
 
 - 修复：运行环会把搜索专用工作区（`~/.dsh-ux-plus/search`）里的会话也算作「正在运行」，点下去就把人带进那个被隐藏的工作区。现在 `runningSessions()` 用 `ownedBySearch()` 过滤三类会话：`state.extraHidden`（本实例刚创建、还没进工作区的）、搜索工作区 `sessionIds` 里的、以及 `cwd` 正好等于搜索目录的。

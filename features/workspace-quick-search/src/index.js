@@ -80,9 +80,9 @@ const MESSAGES = {
     noWorkspace: '无法准备搜索工作区：后台目录未就绪，重启 DSH 后重试',
     createFailed: '创建会话失败',
     promptFailed: '发送失败',
-    runningNone: '没有会话在运行',
-    runningCount: '{n} 个会话正在运行',
-    runningTitle: '正在运行 · {n}',
+    ringEmpty: '还没有搜索会话',
+    ringOpen: '打开最近的搜索会话：{title}',
+    ringRunning: '{n} 个搜索会话在跑 · 点击回到最近一个',
     untitled: '未命名会话',
     openFailed: '打不开这个会话：{reason}',
     openService: '没有找到宿主的会话导航服务',
@@ -105,9 +105,9 @@ const MESSAGES = {
     noWorkspace: 'Cannot prepare the search workspace: its directory is missing, restart DSH and retry',
     createFailed: 'Could not create the session',
     promptFailed: 'Could not send the prompt',
-    runningNone: 'Nothing running',
-    runningCount: '{n} running',
-    runningTitle: 'Running · {n}',
+    ringEmpty: 'No search session yet',
+    ringOpen: 'Open the latest search session: {title}',
+    ringRunning: '{n} search sessions running - back to the latest',
     untitled: 'Untitled session',
     openFailed: 'Could not open this session: {reason}',
     openService: 'The host session navigation service is unavailable',
@@ -423,9 +423,10 @@ function boxCss() {
     `${scope} [data-qs="runs"]::before { content: ""; position: absolute; left: 50%; top: 50%; width: 15px; height: 15px;`
       + ' margin: -7.5px 0 0 -7.5px; box-sizing: border-box; border: 1.4px solid currentColor; border-radius: 50%; }',
     `${scope} [data-qs="runs"]:hover { background: var(--dsw-alias-interactive-bg-hover, rgba(128, 128, 128, 0.12)); }`,
-    `${scope} [data-qs="runs"][data-state="idle"] { color: var(--dsw-alias-label-tertiary, #6b7180); cursor: default; }`,
+    `${scope} [data-qs="runs"][data-state="idle"] { color: var(--dsw-alias-label-tertiary, #6b7180); }`,
     `${scope} [data-qs="runs"][data-state="idle"]::before { opacity: 0.55; }`,
-    `${scope} [data-qs="runs"][data-state="idle"]:hover { background: transparent; }`,
+    `${scope} [data-qs="runs"][aria-disabled="true"] { cursor: default; }`,
+    `${scope} [data-qs="runs"][aria-disabled="true"]:hover { background: transparent; }`,
     `${scope} [data-qs="status"] { font-size: 11px; line-height: 14px; color: #e5534b; }`,
     `${scope} [data-qs="status"][data-qs-state="busy"] { color: var(--dsw-alias-label-secondary, #9aa0ab); }`,
     `${scope} [data-qs="status"]:empty { display: none; }`,
@@ -448,20 +449,6 @@ function boxCss() {
     `${menu} [data-qs="menu-query"] { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }`,
     `${menu} [data-qs="menu-meta"] { font-size: 11px; color: var(--dsw-alias-label-secondary, #9aa0ab); }`,
     `${menu} [data-qs="menu-empty"] { padding: 10px 8px; color: var(--dsw-alias-label-secondary, #9aa0ab); }`,
-    // Running list rows: a pulsing dot says "live", the age is the time since the
-    // session's last activity (the host exposes no run start time).
-    `${menu} [data-qs="run-row"] { display: flex; align-items: center; gap: 8px; width: 100%; padding: 6px 8px;`
-      + ' border: none; border-radius: 6px; background: transparent; color: inherit; font: inherit; text-align: left;'
-      + ' cursor: pointer; }',
-    `${menu} [data-qs="run-row"]:hover { background: var(--dsw-alias-interactive-bg-hover, rgba(128, 128, 128, 0.12)); }`,
-    `${menu} [data-qs="run-dot"] { flex: none; width: 6px; height: 6px; border-radius: 50%; background: currentColor;`
-      + ' color: var(--dsw-alias-label-secondary, #9aa0ab); animation: ux-plus-qs-pulse 1.6s ease-in-out infinite; }',
-    `@keyframes ux-plus-qs-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }`,
-    `@media (prefers-reduced-motion: reduce) { ${menu} [data-qs="run-dot"] { animation: none; } }`,
-    `${menu} [data-qs="run-title"] { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis;`
-      + ' white-space: nowrap; font-size: 13px; }',
-    `${menu} [data-qs="run-age"] { flex: none; font-size: 11px; color: var(--dsw-alias-label-secondary, #9aa0ab);`
-      + ' font-variant-numeric: tabular-nums; }',
   ].join('\n')
 }
 
@@ -553,8 +540,10 @@ export function client(ctx, deps) {
     defaultKey: null,
     busy: false,
     history: readHistory(store ? store.getItem(HISTORY_KEY) : null),
-    /** Top-level sessions the host currently runs, most recent activity first. */
-    running: [],
+    /** Sessions this box owns, most recent activity first (see {@link readSearches}). */
+    searches: [],
+    /** The one a click on the ring opens: the newest of them, running or not. */
+    latest: null,
   }
 
   /** `remote.$host.home` — the host's own home (host and browser agree on it). */
@@ -621,7 +610,7 @@ export function client(ctx, deps) {
       refs.history.setAttribute('aria-label', t('history'))
       refs.history.setAttribute('title', t('history'))
     }
-    refreshRunning()
+    refreshRing()
   }
 
   function el(tag, attrs) {
@@ -692,7 +681,7 @@ export function client(ctx, deps) {
     }
     // The ring follows every session-list change; the pass is idempotent, so a
     // MutationObserver pass that found nothing new writes nothing.
-    refreshRunning()
+    refreshRing()
   }
 
   let pending = null
@@ -1048,7 +1037,7 @@ export function client(ctx, deps) {
   }
 
   // -------------------------------------------------------------------------
-  // Running now: the count ring in the blank to the right of the field.
+  // The ring in the blank to the right of the field: my search sessions.
   // -------------------------------------------------------------------------
 
   /** The title a user recognizes, with the untitled fallback. */
@@ -1060,69 +1049,81 @@ export function client(ctx, deps) {
   }
 
   /**
-   * Whether this session lives in the private search workspace. Those sessions
-   * are hidden from the sidebar on purpose, so the ring must not surface them
-   * either: it answers "what of mine is running", and a search the box itself
-   * started is not a row the user can see anywhere.
+   * Every session this box owns, newest activity first: the private workspace
+   * members, the ones a submission just created (not registered yet), and the
+   * history entries — which also cover a workspace that was never created.
    */
-  function ownedBySearch(summary, sessionId) {
-    if (state.extraHidden.has(sessionId)) return true
-    const row = findSearchWorkspace()
-    if (row !== null && Array.isArray(row.sessionIds) && row.sessionIds.includes(sessionId)) return true
-    const dir = searchDir()
-    if (dir !== null && typeof summary.cwd === 'string' && trimSeparators(summary.cwd) === trimSeparators(dir)) return true
-    return false
-  }
-
-  /**
-   * One row per top-level session the host runs. Subagent sessions are the
-   * parent's own work (the host hides them from the tree the same way,
-   * `tree.ts` skips `origin === 'subagent'`), so they are not counted here.
-   */
-  function runningSessions() {
+  function searchSessionIds() {
     const snapshot = snapshotOf(deps && deps.sessions && deps.sessions.list)
-    if (snapshot === null || snapshot.byId === null || typeof snapshot.byId !== 'object') return []
-    const ids = Array.isArray(snapshot.ids) ? snapshot.ids : Object.keys(snapshot.byId)
+    const byId = snapshot !== null && snapshot.byId !== null && typeof snapshot.byId === 'object' ? snapshot.byId : {}
+    const atOf = (sessionId) => {
+      const summary = byId[sessionId]
+      return summary && typeof summary.updatedAt === 'number' && Number.isFinite(summary.updatedAt) ? summary.updatedAt : 0
+    }
+    const seen = new Set()
     const rows = []
-    for (const sessionId of ids) {
-      const summary = snapshot.byId[sessionId]
-      if (summary === null || typeof summary !== 'object') continue
-      if (summary.running !== true) continue
-      if (summary.origin === 'subagent') continue
-      if (ownedBySearch(summary, sessionId)) continue
-      rows.push({
-        sessionId,
-        title: sessionTitle(summary),
-        at: typeof summary.updatedAt === 'number' && Number.isFinite(summary.updatedAt) ? summary.updatedAt : 0,
-      })
+    const push = (sessionId, fallbackAt) => {
+      if (typeof sessionId !== 'string' || sessionId === '' || seen.has(sessionId)) return
+      seen.add(sessionId)
+      const at = atOf(sessionId)
+      rows.push({ sessionId, at: at === 0 ? fallbackAt : at })
+    }
+    const row = findSearchWorkspace()
+    if (row !== null && Array.isArray(row.sessionIds)) for (const sessionId of row.sessionIds) push(sessionId, 0)
+    for (const sessionId of state.extraHidden) push(sessionId, 0)
+    for (const entry of state.history) {
+      push(entry.sessionId, typeof entry.at === 'number' && Number.isFinite(entry.at) ? entry.at : 0)
     }
     rows.sort((left, right) => right.at - left.at)
     return rows
   }
 
   /**
-   * Re-read the list and repaint the ring. Idempotent on purpose: the scheduled
-   * pass runs on every DOM mutation, and an unchanged count must not write to
-   * the node (which would schedule another pass).
+   * The ring answers one question: where did my searching go. Its number is how
+   * many of those sessions are running, and a click opens the newest one whether
+   * it is still running or has long finished — gating the jump on a live turn
+   * would strand the user the moment the answer arrives.
    */
-  function refreshRunning() {
-    state.running = runningSessions()
+  function readSearches() {
+    const snapshot = snapshotOf(deps && deps.sessions && deps.sessions.list)
+    const byId = snapshot !== null && snapshot.byId !== null && typeof snapshot.byId === 'object' ? snapshot.byId : {}
+    let running = 0
+    const rows = []
+    for (const entry of searchSessionIds()) {
+      const summary = byId[entry.sessionId]
+      const known = summary !== null && typeof summary === 'object'
+      const live = known && summary.running === true && summary.origin !== 'subagent'
+      if (live) running += 1
+      rows.push({ sessionId: entry.sessionId, title: known ? sessionTitle(summary) : t('untitled'), running: live })
+    }
+    return { rows, latest: rows.length === 0 ? null : rows[0], running }
+  }
+
+  /**
+   * Re-read the list and repaint the ring. Idempotent on purpose: the scheduled
+   * pass runs on every DOM mutation, and an unchanged ring must not write to the
+   * node (which would schedule another pass).
+   */
+  function refreshRing() {
+    const read = readSearches()
+    state.searches = read.rows
+    state.latest = read.latest
     const button = refs.runs
     if (button === null) return
-    const n = state.running.length
-    const count = n === 0 ? '' : n > 9 ? '9+' : String(n)
+    const count = read.running === 0 ? '' : read.running > 9 ? '9+' : String(read.running)
     if (button.textContent !== count) button.textContent = count
-    const mode = n === 0 ? 'idle' : 'active'
+    const mode = read.running === 0 ? 'idle' : 'active'
     if (button.getAttribute('data-state') !== mode) button.setAttribute('data-state', mode)
-    const disabled = n === 0 ? 'true' : 'false'
+    const disabled = read.latest === null ? 'true' : 'false'
     if (button.getAttribute('aria-disabled') !== disabled) button.setAttribute('aria-disabled', disabled)
-    const label = n === 0 ? t('runningNone') : t('runningCount', { n })
+    let label = t('ringEmpty')
+    if (read.latest !== null) {
+      label = read.running === 0 ? t('ringOpen', { title: read.latest.title }) : t('ringRunning', { n: read.running })
+    }
     if (button.getAttribute('title') !== label) {
       button.setAttribute('title', label)
       button.setAttribute('aria-label', label)
     }
-    // A list of two has nothing left to list once one of them stopped.
-    if (n < 2 && popup !== null && popupKind === 'running') closePanel()
   }
 
   /**
@@ -1169,51 +1170,11 @@ export function client(ctx, deps) {
     return true
   }
 
-  /** One click: nothing to open, the only running session, or the list. */
+  /** One click opens the newest search session — running or long finished. */
   function onRunsClick() {
-    const rows = state.running
-    if (rows.length === 0) return
-    if (rows.length === 1) {
-      openSessionById(rows[0].sessionId)
-      return
-    }
-    openRunningPanel()
-  }
-
-  /** The running list: title plus the age of the last activity, newest first. */
-  function openRunningPanel() {
-    if (popup !== null && popupKind === 'running') {
-      closePanel()
-      return
-    }
-    refreshRunning()
-    const rows = state.running
-    const node = el('div', { 'data-dsh-ux-plus': MENU_VALUE, 'data-ux-plus-instance': INSTANCE_TOKEN, role: 'dialog', 'aria-label': t('runningTitle', { n: rows.length }) })
-    const head = el('div', { 'data-qs': 'menu-head' })
-    const label = document.createElement('span')
-    label.textContent = t('runningTitle', { n: rows.length })
-    head.appendChild(label)
-    node.appendChild(head)
-    if (rows.length === 0) {
-      const empty = el('div', { 'data-qs': 'menu-empty' })
-      empty.textContent = t('runningNone')
-      node.appendChild(empty)
-    } else {
-      for (const entry of rows) {
-        const row = el('button', { 'data-qs': 'run-row', type: 'button' })
-        row.appendChild(el('span', { 'data-qs': 'run-dot' }))
-        const name = el('span', { 'data-qs': 'run-title' })
-        name.textContent = entry.title
-        const age = el('span', { 'data-qs': 'run-age' })
-        const bucket = ageBucket(entry.at, Date.now())
-        age.textContent = t(bucket.key, bucket.n === undefined ? undefined : { n: bucket.n })
-        row.appendChild(name)
-        row.appendChild(age)
-        row.addEventListener('click', () => openSessionById(entry.sessionId))
-        node.appendChild(row)
-      }
-    }
-    openPanel(node, refs.runs, 'running')
+    const latest = state.latest
+    if (latest === null) return
+    openSessionById(latest.sessionId)
   }
 
   /**
@@ -1222,7 +1183,7 @@ export function client(ctx, deps) {
    *
    * @param {object} node - the populated panel element.
    * @param {object | null} anchor - the control the panel points at.
-   * @param {string} kind - 'history' | 'model' | 'running': clicking that icon again closes it.
+   * @param {string} kind - 'history' | 'model': clicking that icon again closes it.
    */
   function openPanel(node, anchor, kind) {
     closePanel()

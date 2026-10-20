@@ -57,7 +57,7 @@ A search box sits permanently under **Automated tasks** in the sidebar and drops
 | --- | --- |
 | Search box (magnifier on the left) | Enter searches straight away (the field is single-line); an Enter that ends an IME composition never submits by accident |
 | Model picker | A small chip icon on the right: click it for the model list (the current pick is ticked). Leave it alone to use the host default; a non-default pick puts a dot on the chip and is remembered locally |
-| Running ring (far right) | How many sessions are running right now: dim and inert at 0, a click jumps to the only one, a click on 2+ opens a list to pick from (title + age). Top-level sessions only — subagents count as their parent |
+| Running ring (far right) | How many of your search sessions are running right now; a click always returns to the newest one, finished or not; dim and inert while there is no search session yet |
 | Clock icon (right) | Opens history: the last 50 searches, one click reopens that session, one button clears the list |
 | Sidebar | Search sessions **never show up** — they all live in the hidden workspace |
 
@@ -69,9 +69,7 @@ Type a question in that box, the two icons on the right stay put, Enter opens an
 
 ![A question typed into the box, the three icons unchanged](docs/images/quick-search-typed.png)
 
-When sessions are running, the right-hand ring lights up with their count; with two or more, a click opens this list and a row jumps to that session:
-
-![The ring shows 3; opened, it lists three running sessions with their titles and ages](docs/images/quick-search-running.png)
+While a search is running, the right-hand ring lights up with the count; a click returns to the newest search session — finished or not.
 
 ### Attention favicon
 
@@ -163,6 +161,7 @@ The three most recent entries; full history in [CHANGELOG.md](CHANGELOG.md).
 - **v0.5.3 · 2026-10-19** — Quick-search style isolation: every rule for the box and its popups is scoped to this evaluation's own token, so a superseded bundle's stylesheet cannot restyle the box even when it is inserted later with equal specificity — verified by appending the 0.5.1 sheet last, gutters stayed 13px / 13px.
 - **v0.5.2 · 2026-10-19** — Two quick-search fixes: the box now has strictly symmetric gutters (both ends are a 22px slot inside 8px padding, so the magnifier no longer sits closer to the edge than the right-hand icons), and a box left behind by a hot-replaced bundle instance no longer stacks under the new one — our nodes carry a per-evaluation token, so a stale marker is hidden instead of fought over.
 - **v0.5.1 · 2026-10-19** — Quick search polish: the model picker is now a small chip icon that opens a menu (a dot marks a non-default pick), the box contents are properly centred, and the box no longer needs `remote.$host.home` at mount — Enter searches as soon as the connection is ready.
+- **v0.5.11 · 2026-10-20** — The ring now means "my search sessions": it counts only sessions in the private search workspace, and a click always returns to the newest one — finished or still running — never to an ordinary sidebar session.
 - **v0.5.10 · 2026-10-20** — The running ring only counts what the sidebar would show: sessions in the private search workspace (including an unregistered one still running in it) no longer light it up or get opened by it.
 - **v0.5.9 · 2026-10-19** — Opening a session no longer fails silently: the ring (and the history list) try the host navigation service, then click the host row for that session, and report the reason in the box if both routes fail.
 - **v0.5.8 · 2026-10-19** — A "running now" ring joins the right end of the search box: it counts live sessions, jumps straight to the only one, opens a picker for several. The box narrows by 24px; the hint still fits.

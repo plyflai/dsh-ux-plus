@@ -445,7 +445,7 @@ test('mount inserts the box as the region first child and dispose removes every 
     assert.equal(runs.getAttribute('data-state'), 'idle', 'nothing is running at mount')
     assert.equal(runs.getAttribute('aria-disabled'), 'true')
     assert.equal(runs.textContent, '', 'the idle ring carries no count')
-    assert.equal(runs.getAttribute('title'), '没有会话在运行')
+    assert.equal(runs.getAttribute('title'), '还没有搜索会话')
     assert.ok(fieldCss.includes('[data-ux-plus-instance]'), 'our geometry rules are instance-scoped, so a stale sheet cannot restyle them')
     // The sidebar region is inset asymmetrically; the box must flush with the list band,
     // so its left edge lines up with the rows and its right edge with the header controls.
@@ -483,70 +483,64 @@ test('mount inserts the box as the region first child and dispose removes every 
   }
 })
 
-test('the running ring counts live sessions, jumps when there is one, lists when there are more', async () => {
+test('the ring counts the running search sessions and always opens the newest one', async () => {
   const env = makeEnv()
   installGlobals(env)
   try {
     const { ctx, calls } = makeCtx()
-    const { deps, setSessions } = makeDeps()
+    const searchView = { workspaceId: 'ws-search', path: WORKSPACE_PATH, title: 'search', sessionIds: ['s-a', 's-b'] }
+    const { deps, workspaces, setSessions } = makeDeps({ items: [searchView] })
     const { rootNode } = await mount(env, ctx, deps)
     const runs = pick(rootNode, 'data-qs', 'runs')
-    const panel = () => env.document.body.children.find((el) => el.getAttribute('data-dsh-ux-plus') === 'quick-search-history') || null
 
-    // Two top-level sessions run, one subagent session runs, one session is idle.
+    // Two search sessions run; a subagent child and an unrelated session must not count.
     setSessions([
       { id: 's-a', running: true, displayTitle: '清理 Docker 缓存', updatedAt: 2_000 },
       { id: 's-b', running: true, displayTitle: '关于项目结构的讨论', updatedAt: 1_000 },
       { id: 's-sub', running: true, origin: 'subagent', displayTitle: 'child', updatedAt: 3_000 },
-      { id: 's-c', running: false, displayTitle: 'idle one', updatedAt: 4_000 },
+      { id: 's-x', running: true, displayTitle: '别的会话', updatedAt: 4_000 },
     ])
     env.flushTimers()
     assert.equal(runs.getAttribute('data-state'), 'active')
-    assert.equal(runs.getAttribute('aria-disabled'), 'false')
-    assert.equal(runs.textContent, '2', 'a subagent session is the parent work, not a row of its own')
-    assert.equal(runs.getAttribute('title'), '2 个会话正在运行')
+    assert.equal(runs.textContent, '2', 'only the sessions this box started are counted')
+    assert.equal(runs.getAttribute('title'), '2 个搜索会话在跑 · 点击回到最近一个')
 
+    // The jump is not gated on a live turn: it always lands on the newest search session.
     runs.dispatch('click', {})
-    const list = panel()
-    assert.ok(list, 'two sessions open the list')
-    const rows = collect(list, (el) => el.getAttribute('data-qs') === 'run-row')
-    assert.deepEqual(
-      rows.map((row) => pick(row, 'data-qs', 'run-title').textContent),
-      ['清理 Docker 缓存', '关于项目结构的讨论'],
-      'newest activity first',
-    )
-    rows[1].dispatch('click', {})
-    assert.deepEqual(calls.opened, ['s-b'], 'a row opens that session')
-    assert.equal(panel(), null, 'and closes the list')
+    assert.deepEqual(calls.opened, ['s-a'], 'newest activity first')
 
-    // Down to one: a click goes straight there, no list in the way.
-    setSessions([{ id: 's-b', running: true, displayTitle: '关于项目结构的讨论', updatedAt: 1_000 }])
-    env.flushTimers()
-    assert.equal(runs.textContent, '1')
-    runs.dispatch('click', {})
-    assert.deepEqual(calls.opened, ['s-b', 's-b'])
-    assert.equal(panel(), null)
-
-    // An open list closes itself when the second session stops (nothing left to list).
+    // The newest one has finished: the count drops, the jump stays.
     setSessions([
-      { id: 's-a', running: true, displayTitle: '甲', updatedAt: 2_000 },
-      { id: 's-b', running: true, displayTitle: '乙', updatedAt: 1_000 },
+      { id: 's-a', running: false, displayTitle: '清理 Docker 缓存', updatedAt: 2_000 },
+      { id: 's-b', running: true, displayTitle: '关于项目结构的讨论', updatedAt: 1_000 },
     ])
     env.flushTimers()
+    assert.equal(runs.getAttribute('data-state'), 'active')
+    assert.equal(runs.textContent, '1')
     runs.dispatch('click', {})
-    assert.ok(panel())
-    setSessions([{ id: 's-a', running: true, displayTitle: '甲', updatedAt: 2_000 }])
-    env.flushTimers()
-    assert.equal(panel(), null, 'a list of two has nothing left to list once one stops')
+    assert.deepEqual(calls.opened, ['s-a', 's-a'], 'a finished session with the newest activity still opens')
 
-    // Nothing running: the ring empties and a click does nothing.
-    setSessions([])
+    // Nothing running at all: the ring dims, and a click still opens the newest.
+    setSessions([
+      { id: 's-a', running: false, displayTitle: '清理 Docker 缓存', updatedAt: 2_000 },
+      { id: 's-b', running: false, displayTitle: '关于项目结构的讨论', updatedAt: 5_000 },
+    ])
     env.flushTimers()
     assert.equal(runs.getAttribute('data-state'), 'idle')
     assert.equal(runs.textContent, '')
-    assert.equal(runs.getAttribute('title'), '没有会话在运行')
+    assert.equal(runs.getAttribute('aria-disabled'), 'false', 'there is still something to open')
+    assert.equal(runs.getAttribute('title'), '打开最近的搜索会话：关于项目结构的讨论')
     runs.dispatch('click', {})
-    assert.deepEqual(calls.opened, ['s-b', 's-b'], 'idle clicks open nothing')
+    assert.deepEqual(calls.opened, ['s-a', 's-a', 's-b'], 'idle means nothing runs, not nothing to open')
+
+    // No search session anywhere: the ring has nowhere to go.
+    workspaces.set({ phase: 'ready', items: [{ ...searchView, sessionIds: [] }] })
+    setSessions([])
+    env.flushTimers()
+    assert.equal(runs.getAttribute('aria-disabled'), 'true')
+    assert.equal(runs.getAttribute('title'), '还没有搜索会话')
+    runs.dispatch('click', {})
+    assert.deepEqual(calls.opened, ['s-a', 's-a', 's-b'], 'nothing to open, nothing happens')
   } finally {
     uninstallGlobals(env)
   }
@@ -759,7 +753,7 @@ test('a workspace that cannot be registered is reported and opens nothing', asyn
 // History popup.
 // ---------------------------------------------------------------------------
 
-test('the running ring ignores the private search workspace', async () => {
+test('the ring opens the newest search session, never a workspace session', async () => {
   const env = makeEnv()
   installGlobals(env)
   try {
@@ -770,21 +764,23 @@ test('the running ring ignores the private search workspace', async () => {
     const runs = pick(rootNode, 'data-qs', 'runs')
 
     setSessions([
-      { id: 's-owned', running: true, displayTitle: '搜索会话', updatedAt: 3_000 },
-      { id: 's-cwd', running: true, displayTitle: '还没登记进工作区的搜索会话', cwd: WORKSPACE_PATH, updatedAt: 2_000 },
-      { id: 's-mine', running: true, displayTitle: '我的会话', updatedAt: 1_000 },
+      { id: 's-owned', running: true, displayTitle: '搜索会话', updatedAt: 2_000 },
+      { id: 's-mine', running: true, displayTitle: '我的会话', updatedAt: 3_000 },
     ])
     env.flushTimers()
-    assert.equal(runs.textContent, '1', 'the search session is not something the user can see, so it is not counted')
+    assert.equal(runs.textContent, '1', 'a workspace session is not what this ring counts')
     runs.dispatch('click', {})
-    assert.deepEqual(calls.opened, ['s-mine'], 'and a click opens that one, never a search session')
+    assert.deepEqual(calls.opened, ['s-owned'], 'never a session the box did not start')
 
-    // Only search work running: the ring stays idle, so no click can land in the hidden workspace.
-    setSessions([{ id: 's-owned', running: true, displayTitle: '搜索会话', updatedAt: 3_000 }])
+    // The search session stays the target once everything has stopped.
+    setSessions([
+      { id: 's-owned', running: false, displayTitle: '搜索会话', updatedAt: 2_000 },
+      { id: 's-mine', running: false, displayTitle: '我的会话', updatedAt: 3_000 },
+    ])
     env.flushTimers()
     assert.equal(runs.getAttribute('data-state'), 'idle')
     runs.dispatch('click', {})
-    assert.deepEqual(calls.opened, ['s-mine'])
+    assert.deepEqual(calls.opened, ['s-owned', 's-owned'])
   } finally {
     uninstallGlobals(env)
   }
@@ -795,7 +791,7 @@ test('a refused navigation falls back to clicking the host row for that session'
   installGlobals(env)
   try {
     const { ctx } = makeCtx({ navigate: 'throws' })
-    const { deps, setSessions } = makeDeps()
+    const { deps, setSessions } = makeDeps({ items: [{ workspaceId: 'ws-search', path: WORKSPACE_PATH, title: 'search', sessionIds: ['s-b'] }] })
     const { rootNode } = await mount(env, ctx, deps)
     setSessions([{ id: 's-b', running: true, displayTitle: '关于项目结构的讨论', updatedAt: 1_000 }])
     env.flushTimers()
@@ -822,7 +818,7 @@ test('a navigation that cannot happen is reported in the box, never swallowed', 
   installGlobals(env)
   try {
     const { ctx } = makeCtx({ navigate: 'none' })
-    const { deps, setSessions } = makeDeps()
+    const { deps, setSessions } = makeDeps({ items: [{ workspaceId: 'ws-search', path: WORKSPACE_PATH, title: 'search', sessionIds: ['s-b'] }] })
     const { rootNode } = await mount(env, ctx, deps)
     setSessions([{ id: 's-b', running: true, displayTitle: '关于项目结构的讨论', updatedAt: 1_000 }])
     env.flushTimers()
