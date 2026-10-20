@@ -5,7 +5,7 @@
 Docs only.
 
 - Both README update logs are sorted by version — strictly newest-first — again: the 0.5.8 through 0.5.12 bullets had been appended underneath 0.5.1 (the anchor for each edit was the first bullet it found, not the top of the list), which left the log reading 0.5.7 → 0.5.6 → … → 0.5.1 → 0.5.12 → … → 0.5.8 → 0.5.0.
-- The log intro no longer says "three most recent entries" (it lists fifteen); it now states the direction instead.
+- The README log now lists only the five most recent entries, newest first; everything older lives in this CHANGELOG. Its intro line says so instead of the old "three most recent entries".
 - `npm test` 137/137, `npm run build` unchanged, no source or bundle change.
 
 ## 0.5.12 — 2026-10-20
