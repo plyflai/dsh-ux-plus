@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.5.19 — 2026-10-21
+
+- 气泡状态点：`readSearches()` 现在给每条搜索会话带一个 `kind`，来源是宿主的 liveness 映射 `deps.uiSession.sessionStatus`（`{running, pendingInteraction, completionUnread}`）经已有的 `statusKind()` 归一化。优先级沿用宿主状态点：待回复 > 运行中 > 跑完没看 > 无。
+- 气泡右上角新增 `[data-qs="badge"]`：绿＝跑完没看（`completionUnread`），橙＝等你回复（`pendingInteraction` 非空）。正在跑时角标不显示——那是气泡内部亮起的那颗点的事。颜色用 `--dsw-alias-state-success-primary` / `--dsw-alias-state-warn-primary`，外圈描边用 `--dsw-specific-sidebar-fill` 让它盖在图标上而不是并排多一颗点。
+- 悬停/读屏文案接上状态：`打开最近的搜索会话：<标题> · 已完成` / `· 待你回复`（`badgeUnread` / `badgeWaiting`）。
+- 历史弹窗每条搜索前面同样带点（`[data-qs="row-badge"]`，无状态时只占位不显示，标题不会因此左右错位），并给带状态的行加 `data-qs-attention`。
+- 订阅补上 `deps.uiSession.sessionStatus`：读完一条搜索不会改动会话列表，但角标必须在那一刻消失。
+- 测试 139/139（新增 1 条：绿点/橙点/运行中不显示/历史行逐条带点/读过后消失）；`lib/client.js` 236.96 kB。
+
 ## 0.5.18 — 2026-10-21
 
 - 修掉隐藏工作区在侧边栏留下的空块。宿主把工作区标题行包在 `HoverCard` 自己的 `<span>` 里，所以标题行的**直接父元素**不是那个同时装着会话行和【展开其余 N 个会话】的分组（`div.groupSection`），而是这层 span。原来的 `*:has(> [data-row-key="workspace:<id>"])` 只藏住了 span，分组里还剩边距和折叠按钮——看上去就是一个没有标题、只有「展开其余 1 个会话」的空工作区。

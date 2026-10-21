@@ -270,6 +270,15 @@ function makeDeps(options = {}) {
   const byId = {}
   const sessions = makeList({ phase: 'ready', ids, byId })
   const workspaces = makeList({ phase: 'ready', items: options.items || [] })
+  /** The host's liveness map (`uiSession.sessionStatus`): sessionId -> status. */
+  const statuses = makeList(new Map())
+  /** Push one session's attention state (waiting / running / unread / read). */
+  const setStatus = (sessionId, status) => {
+    const next = new Map(statuses.getSnapshot())
+    if (status === null) next.delete(sessionId)
+    else next.set(sessionId, status)
+    statuses.set(next)
+  }
   /** Replace the whole session list: what the host pushes when sessions start or stop. */
   const setSessions = (entries) => {
     for (const key of Object.keys(byId)) delete byId[key]
@@ -302,8 +311,9 @@ function makeDeps(options = {}) {
         return view
       },
     },
+    uiSession: { sessionStatus: statuses },
   }
-  return { deps, calls, sessions, workspaces, setSessions }
+  return { deps, calls, sessions, workspaces, statuses, setStatus, setSessions }
 }
 
 /** Mount the feature and hand back the box's pieces. */
@@ -801,6 +811,81 @@ test('the bubble opens the newest search session, never a workspace session', as
     assert.equal(runs.getAttribute('data-state'), 'idle')
     runs.dispatch('click', {})
     assert.deepEqual(calls.opened, ['s-owned', 's-owned'])
+  } finally {
+    uninstallGlobals(env)
+  }
+})
+
+test('a corner dot marks what is waiting for me, on the bubble and in the history rows', async () => {
+  const env = makeEnv()
+  installGlobals(env)
+  try {
+    const { ctx } = makeCtx()
+    const searchView = { workspaceId: 'ws-search', path: WORKSPACE_PATH, title: 'search', sessionIds: ['s-a', 's-b'] }
+    const { deps, setSessions, setStatus } = makeDeps({ items: [searchView] })
+    env.window.localStorage.setItem('dsh.ux-plus.quick-search.history', JSON.stringify([
+      { sessionId: 's-a', query: '清理 Docker 缓存', at: 2_000 },
+      { sessionId: 's-b', query: '关于项目结构的讨论', at: 1_000 },
+    ]))
+    const { rootNode } = await mount(env, ctx, deps)
+    const runs = pick(rootNode, 'data-qs', 'runs')
+    const badge = pick(rootNode, 'data-qs', 'badge')
+    assert.ok(badge, 'the bubble carries a corner dot')
+    assert.equal(badge.getAttribute('data-state'), 'none', 'no session yet, so nothing to mark')
+
+    setSessions([
+      { id: 's-a', running: false, displayTitle: '清理 Docker 缓存', updatedAt: 2_000 },
+      { id: 's-b', running: false, displayTitle: '关于项目结构的讨论', updatedAt: 1_000 },
+    ])
+    env.flushTimers()
+    assert.equal(badge.getAttribute('data-state'), 'none', 'a finished turn nobody flagged stays plain')
+
+    // Finished and not read: green.
+    setStatus('s-a', { running: false, completionUnread: true })
+    env.flushTimers()
+    assert.equal(badge.getAttribute('data-state'), 'unread', 'an unread answer marks the newest search session')
+    assert.equal(runs.getAttribute('title'), '打开最近的搜索会话：清理 Docker 缓存 · 已完成')
+
+    // A question trumps the unread mark: amber.
+    setStatus('s-a', { running: false, completionUnread: true, pendingInteraction: { id: 'q-1' } })
+    env.flushTimers()
+    assert.equal(badge.getAttribute('data-state'), 'waiting', 'waiting for an answer outranks unread')
+    assert.equal(runs.getAttribute('title'), '打开最近的搜索会话：清理 Docker 缓存 · 待你回复')
+
+    // Still running: the bubble's own dot says it, the corner stays empty.
+    setStatus('s-a', { running: true })
+    env.flushTimers()
+    assert.equal(badge.getAttribute('data-state'), 'none')
+    assert.equal(runs.getAttribute('data-state'), 'active')
+
+    // The history rows carry the same marks, one per session.
+    setStatus('s-a', { running: false, pendingInteraction: { id: 'q-1' } })
+    setStatus('s-b', { running: false, completionUnread: true })
+    env.flushTimers()
+    pick(rootNode, 'data-qs', 'history').dispatch('click', {})
+    const popup = env.document.body.children.find((el) => el.getAttribute('data-dsh-ux-plus') === 'quick-search-history')
+    const rows = collect(popup, (el) => el.getAttribute('data-qs') === 'menu-row')
+    assert.equal(rows.length, 2)
+    const first = pick(rows[0], 'data-qs', 'row-badge')
+    const second = pick(rows[1], 'data-qs', 'row-badge')
+    assert.equal(first.getAttribute('data-state'), 'waiting', 'the newest row asks for an answer')
+    assert.equal(second.getAttribute('data-state'), 'unread', 'the other finished unseen')
+    assert.equal(rows[0].getAttribute('data-qs-attention'), 'waiting')
+    assert.equal(rows[1].getAttribute('data-qs-attention'), 'unread')
+    // Reading it clears the mark the next time the popup opens.
+    pick(rootNode, 'data-qs', 'history').dispatch('click', {})
+    assert.equal(
+      env.document.body.children.some((el) => el.getAttribute('data-dsh-ux-plus') === 'quick-search-history'),
+      false,
+      'a second click on the icon closes the popup',
+    )
+    setStatus('s-b', { running: false, completionUnread: false })
+    env.flushTimers()
+    pick(rootNode, 'data-qs', 'history').dispatch('click', {})
+    const reopened = env.document.body.children.find((el) => el.getAttribute('data-dsh-ux-plus') === 'quick-search-history')
+    const plain = collect(reopened, (el) => el.getAttribute('data-qs') === 'menu-row')[1]
+    assert.equal(pick(plain, 'data-qs', 'row-badge').getAttribute('data-state'), 'none')
+    assert.equal(plain.getAttribute('data-qs-attention'), null)
   } finally {
     uninstallGlobals(env)
   }

@@ -39,7 +39,7 @@ Each row lists only what you can see and do in the interface.
 
 | Feature | Interaction detail | Preview |
 | --- | --- | --- |
-| **Workspace quick search** | • Below 【Automation tasks】, always one row; yields when the sidebar collapses to the rail<br>• Type one line, press Enter: an ordinary Session starts — no workspace, no name to invent<br>• Model: the small icon on the right; leave it alone to follow the host default<br>• History: the clock icon, last 50 searches, one click back to that Session<br>• Bubble: one click returns to your newest search Session; a dot lights while one runs<br>• Search Sessions stay out of the sidebar; switch the feature off and they come back | <img src="docs/images/quick-search.png" width="170" alt="The search box that sits above the workspace list"> |
+| **Workspace quick search** | • Below 【Automation tasks】, always one row; yields when the sidebar collapses to the rail<br>• Type one line, press Enter: an ordinary Session starts — no workspace, no name to invent<br>• Model: the small icon on the right; leave it alone to follow the host default<br>• History: the clock icon, last 50 searches, one click back to that Session<br>• Bubble: one click returns to your newest search Session; a dot lights inside while it runs — green when an answer is unread, amber when a turn waits on you<br>• Search Sessions stay out of the sidebar; switch the feature off and they come back | <img src="docs/images/quick-search.png" width="170" alt="The search box that sits above the workspace list"> |
 | **Tab attention marker** | • A Session is working: the whale on the tab breathes slowly<br>• Something finished unseen: the whale turns green, the same green as the list dot<br>• Something waits for you: an orange dot blinks in the corner<br>• Neither: the host's own icon comes back; subagents and blank Sessions never light it | — |
 | **Recency order** | • Sessions running or touched today fold into a pale-green Active block, history below it<br>• State dots: orange (waiting for you), blue (running), green (finished unseen)<br>• Expand through the host's own 【show N more】, pinned right under the block<br>• Newest on top; a workspace with running or waiting members moves up too<br>• 【Ungrouped】 always sinks to the bottom, however new it is<br>• Idle for more than a day: the workspace folds away; hover a row to see how long ago<br>• Only the visible order changes; the host's grouping and sort settings stay put | <img src="docs/images/recency-expanded.png" width="170" alt="The Active block and the pinned expand button"> |
 | **Conversation type size and width** | • Settings → General → Conversation<br>• Five type sizes, four reading widths<br>• Applies at once and only to conversation content | <img src="docs/images/typography.png" width="170" alt="Rendered conversation"> |
@@ -59,8 +59,8 @@ A search box sits permanently under **Automated tasks** in the sidebar and drops
 | --- | --- |
 | Search box (magnifier on the left) | Enter searches straight away (the field is single-line); an Enter that ends an IME composition never submits by accident |
 | Model picker | A small chip icon on the right: click it for the model list (the current pick is ticked). Leave it alone to use the host default; a non-default pick puts a dot on the chip and is remembered locally |
-| Session bubble (far right) | One click returns to the newest search session, finished or not. While a search is running a dot lights inside the bubble and breathes — never a number. Dim and inert while there is no search session yet |
-| Clock icon (right) | Opens history: the last 50 searches, one click reopens that session, one button clears the list |
+| Session bubble (far right) | One click returns to the newest search session, finished or not. While a search is running a dot lights inside the bubble and breathes — never a number. A small corner dot carries the state: **green** = the answer arrived and is unread, **amber** = a turn is waiting for your reply. Dim and inert while there is no search session yet |
+| Clock icon (right) | Opens history: the last 50 searches, one click reopens that session, one button clears the list. Each row carries the same dot — green for an unread answer, amber for a pending question |
 | Sidebar | Search sessions **never show up** — they all live in the hidden workspace |
 
 - The hidden workspace is `.dsh-ux-plus/search` in your home directory, created on first use. It is not in the workspace list and has no group in the session tree, yet the history popup still takes you back to any old search session.
@@ -158,11 +158,11 @@ npm run build   # tsdown emits lib/client.js (classic script, committed to the r
 
 The five most recent entries; full history in [CHANGELOG.md](CHANGELOG.md).
 
+- **v0.5.19 · 2026-10-21** — The session bubble at the right end of the search box carries a state dot: green when an answer finished and is still unread, amber when a turn is waiting for your reply. The history popup shows the same dots beside each search.
 - **v0.5.18 · 2026-10-21** — No more empty block left by the hidden workspace: only its title row and session rows used to be hidden, so the sidebar kept an untitled strip holding nothing but 【show N more】. The whole section is taken away now.
 - **v0.5.17 · 2026-10-21** — 【Ungrouped】 is pinned to the bottom of the sidebar workspace list: a stray session that was just used, or is even running, can no longer push a workspace down.
 - **v0.5.16 · 2026-10-21** — The previews are capped at 170px, so the Interaction detail column roughly doubles (270px → 575px) instead of the screenshot taking half the table. Docs only.
 - **v0.5.15 · 2026-10-21** — The Features table is trimmed to what you can see and do: timings, percentages and other internals are gone. Docs only.
-- **v0.5.14 · 2026-10-21** — The Features table now carries the full interaction detail of all seven features as bullets: triggers, visible states, how failures read, and what switching a feature off leaves behind. Behaviours that used to live only in the code — the newest row floating to the top, a workspace moving up by recency — are spelled out. Docs only.
 
 ## License
 

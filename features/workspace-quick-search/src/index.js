@@ -84,6 +84,8 @@ const MESSAGES = {
     ringOpen: '打开最近的搜索会话：{title}',
     ringOpenLive: '打开最近的搜索会话：{title}（正在运行）',
     untitled: '未命名会话',
+    badgeWaiting: '待你回复',
+    badgeUnread: '已完成',
     openFailed: '打不开这个会话：{reason}',
     openService: '没有找到宿主的会话导航服务',
     now: '刚刚',
@@ -109,6 +111,8 @@ const MESSAGES = {
     ringOpen: 'Open the latest search session: {title}',
     ringOpenLive: 'Open the latest search session: {title} (running)',
     untitled: 'Untitled session',
+    badgeWaiting: 'waiting for you',
+    badgeUnread: 'done',
     openFailed: 'Could not open this session: {reason}',
     openService: 'The host session navigation service is unavailable',
     now: 'just now',
@@ -170,6 +174,26 @@ export function searchWorkspacePath(home) {
  */
 function cssString(value) {
   return `"${String(value).replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`
+}
+
+/**
+ * One session's attention state, in the order it must win: a pending
+ * interaction outranks a live run, which outranks a completion the user has
+ * not looked at yet — the same precedence the host's own state dots use
+ * (`features/workspace-recency-order/src/index.js` statusOf, and
+ * `packages/client/ui-primitives/src/StateDot.module.css` for the colours).
+ *
+ * Pure on purpose: the caller owns the store, this owns the rule.
+ *
+ * @param {object|undefined|null} status - one `sessionStatus` entry.
+ * @returns {'waiting'|'running'|'unread'|'none'}
+ */
+export function statusKind(status) {
+  if (status === null || status === undefined || typeof status !== 'object') return 'none'
+  if (status.pendingInteraction !== undefined && status.pendingInteraction !== null) return 'waiting'
+  if (status.running === true) return 'running'
+  if (status.completionUnread === true) return 'unread'
+  return 'none'
 }
 
 /**
@@ -441,7 +465,7 @@ function boxCss() {
     // Back to my last search: a 20px hit area holding a 14px chat bubble. Idle is
     // the quiet outline with the dot switched off; running is the same bubble with
     // the dot lit, so the glyph never changes shape under the pointer.
-    `${scope} [data-qs="runs"] { flex: 0 0 auto; display: inline-flex; align-items: center; justify-content: center;`
+    `${scope} [data-qs="runs"] { position: relative; flex: 0 0 auto; display: inline-flex; align-items: center; justify-content: center;`
       + ' width: 20px; height: 20px; padding: 0; border: none; border-radius: 6px; background: transparent;'
       + ' color: var(--dsw-alias-label-secondary, #9aa0ab); line-height: 0; cursor: pointer; }',
     `${scope} [data-qs="runs"]:hover { background: var(--dsw-alias-interactive-bg-hover, rgba(128, 128, 128, 0.12)); }`,
@@ -453,6 +477,15 @@ function boxCss() {
     `@media (prefers-reduced-motion: reduce) { ${scope} [data-qs="runs"][data-state="active"] [data-qs="run-dot"] { animation: none; } }`,
     `${scope} [data-qs="runs"][aria-disabled="true"] { cursor: default; }`,
     `${scope} [data-qs="runs"][aria-disabled="true"]:hover { background: transparent; }`,
+    // The corner dot: amber = waiting for an answer, green = finished and unread.
+    // Hidden by default so the icon never shifts; the sidebar fill outlines it so
+    // it reads as a badge on top of the glyph rather than a second dot beside it.
+    `${scope} [data-qs="badge"] { position: absolute; top: 0; right: 0; width: 6px; height: 6px; box-sizing: border-box;`
+      + ' border-radius: 50%; box-shadow: 0 0 0 1.5px var(--dsw-specific-sidebar-fill, #16181c); visibility: hidden; }',
+    `${scope} [data-qs="badge"][data-state="unread"] { visibility: visible;`
+      + ' background: var(--dsw-alias-state-success-primary, #22c55e); }',
+    `${scope} [data-qs="badge"][data-state="waiting"] { visibility: visible;`
+      + ' background: var(--dsw-alias-state-warn-primary, #f59e0b); }',
     `${scope} [data-qs="status"] { font-size: 11px; line-height: 14px; color: #e5534b; }`,
     `${scope} [data-qs="status"][data-qs-state="busy"] { color: var(--dsw-alias-label-secondary, #9aa0ab); }`,
     `${scope} [data-qs="status"]:empty { display: none; }`,
@@ -472,7 +505,14 @@ function boxCss() {
     `${menu} [data-qs="menu-row"][data-qs-active="true"] { background: var(--dsw-alias-interactive-bg-hover, rgba(128, 128, 128, 0.12)); }`,
     `${menu} [data-qs="menu-row"][data-qs-active="true"] [data-qs="menu-label"]::before { content: "✓ "; }`,
     `${menu} [data-qs="menu-label"] { font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }`,
-    `${menu} [data-qs="menu-query"] { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }`,
+    `${menu} [data-qs="menu-line"] { display: flex; align-items: center; gap: 6px; width: 100%; min-width: 0; }`,
+    `${menu} [data-qs="row-badge"] { flex: 0 0 auto; width: 6px; height: 6px; border-radius: 50%; visibility: hidden; }`,
+    `${menu} [data-qs="row-badge"][data-state="unread"] { visibility: visible;`
+      + ' background: var(--dsw-alias-state-success-primary, #22c55e); }',
+    `${menu} [data-qs="row-badge"][data-state="waiting"] { visibility: visible;`
+      + ' background: var(--dsw-alias-state-warn-primary, #f59e0b); }',
+    `${menu} [data-qs="menu-query"] { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis;`
+      + ' white-space: nowrap; font-size: 13px; }',
     `${menu} [data-qs="menu-meta"] { font-size: 11px; color: var(--dsw-alias-label-secondary, #9aa0ab); }`,
     `${menu} [data-qs="menu-empty"] { padding: 10px 8px; color: var(--dsw-alias-label-secondary, #9aa0ab); }`,
   ].join('\n')
@@ -545,6 +585,22 @@ export function client(ctx, deps) {
     } catch {
       return null
     }
+  }
+
+  /**
+   * The host's liveness map (`uiSession.sessionStatus`: sessionId -> status).
+   *
+   * The list snapshot only carries `running`; whether an answer is still
+   * unread, or a turn is blocked on a question, lives here alone — the same
+   * source `features/workspace-recency-order/src/index.js` and
+   * `features/attention-favicon/src/index.js` paint their dots from.
+   *
+   * @returns {Map<string, object> | null} null while the service is missing.
+   */
+  function readStatusMap() {
+    const snapshot = snapshotOf(deps && deps.uiSession && deps.uiSession.sessionStatus)
+    if (snapshot === null || snapshot === undefined || typeof snapshot.get !== 'function') return null
+    return snapshot
   }
 
   const store = storage()
@@ -623,7 +679,7 @@ export function client(ctx, deps) {
   // Placement: one stable node, re-inserted whenever React or the user moves it.
   // -------------------------------------------------------------------------
 
-  const refs = { root: null, input: null, model: null, history: null, runs: null, status: null }
+  const refs = { root: null, input: null, model: null, history: null, runs: null, badge: null, status: null }
 
   /** The text field placeholder / labels follow the active locale. */
   function applyCopy() {
@@ -667,6 +723,10 @@ export function client(ctx, deps) {
     // Outside the field, in the blank the field gives up on its right.
     const runs = el('button', { 'data-qs': 'runs', type: 'button', 'data-state': 'idle', 'aria-disabled': 'true' })
     runs.appendChild(svgIcon(document, [...BUBBLE_PATHS, BUBBLE_DOT], 14))
+    // The corner dot: amber while a turn waits on the user, green on an unread
+    // answer. Present-but-hidden keeps the geometry identical in every state.
+    const badge = el('span', { 'data-qs': 'badge', 'data-state': 'none', 'aria-hidden': 'true' })
+    runs.appendChild(badge)
     const status = el('div', { 'data-qs': 'status', role: 'status' })
     field.appendChild(glass)
     field.appendChild(input)
@@ -687,6 +747,7 @@ export function client(ctx, deps) {
     refs.model = model
     refs.history = history
     refs.runs = runs
+    refs.badge = badge
     refs.status = status
     applyCopy()
     renderModelButton()
@@ -1006,8 +1067,14 @@ export function client(ctx, deps) {
       empty.textContent = t('historyEmpty')
       node.appendChild(empty)
     } else {
+      const kinds = new Map()
+      for (const row of state.searches) kinds.set(row.sessionId, row.kind)
       for (const entry of state.history) {
         const row = el('button', { 'data-qs': 'menu-row', type: 'button' })
+        // Same corner dot as the bubble, inline: amber asks for an answer, green
+        // marks an answer that has not been read yet.
+        const line = el('span', { 'data-qs': 'menu-line' })
+        const flag = el('span', { 'data-qs': 'row-badge', 'data-state': badgeState(kinds.get(entry.sessionId)), 'aria-hidden': 'true' })
         const query = el('span', { 'data-qs': 'menu-query' })
         query.textContent = entry.query
         const meta = el('span', { 'data-qs': 'menu-meta' })
@@ -1016,8 +1083,13 @@ export function client(ctx, deps) {
         const modelName = entry.model === undefined ? '' : ` · ${entry.model}`
         meta.textContent = `${age}${modelName}`
         meta.setAttribute('title', new Date(entry.at).toISOString())
-        row.appendChild(query)
+        line.appendChild(flag)
+        line.appendChild(query)
+        row.appendChild(line)
         row.appendChild(meta)
+        const kind = kinds.get(entry.sessionId)
+        if (kind === 'waiting') row.setAttribute('data-qs-attention', 'waiting')
+        else if (kind === 'unread') row.setAttribute('data-qs-attention', 'unread')
         row.addEventListener('click', () => openSessionById(entry.sessionId))
         node.appendChild(row)
       }
@@ -1114,16 +1186,40 @@ export function client(ctx, deps) {
   function readSearches() {
     const snapshot = snapshotOf(deps && deps.sessions && deps.sessions.list)
     const byId = snapshot !== null && snapshot.byId !== null && typeof snapshot.byId === 'object' ? snapshot.byId : {}
+    const statuses = readStatusMap()
     let running = 0
     const rows = []
     for (const entry of searchSessionIds()) {
       const summary = byId[entry.sessionId]
       const known = summary !== null && typeof summary === 'object'
-      const live = known && summary.running === true && summary.origin !== 'subagent'
+      const status = statuses === null ? null : statuses.get(entry.sessionId)
+      const kind = statusKind(status)
+      const live = kind === 'running' || (known && summary.running === true && summary.origin !== 'subagent')
       if (live) running += 1
-      rows.push({ sessionId: entry.sessionId, title: known ? sessionTitle(summary) : t('untitled'), running: live })
+      rows.push({
+        sessionId: entry.sessionId,
+        title: known ? sessionTitle(summary) : t('untitled'),
+        running: live,
+        /** 'waiting' (needs an answer) | 'unread' (finished, not looked at) | 'running' | 'none'. */
+        kind,
+      })
     }
     return { rows, latest: rows.length === 0 ? null : rows[0], running }
+  }
+
+  /**
+   * The corner dot answers "is there anything for me in there": amber when the
+   * turn is blocked on the user, green when the answer arrived and has not been
+   * read yet. A live turn shows the bubble's own lit dot instead, so the corner
+   * stays empty while it runs.
+   *
+   * @param {'waiting'|'unread'|'running'|'none'|undefined|null} kind
+   * @returns {'waiting'|'unread'|'none'}
+   */
+  function badgeState(kind) {
+    if (kind === 'waiting') return 'waiting'
+    if (kind === 'unread') return 'unread'
+    return 'none'
   }
 
   /**
@@ -1141,11 +1237,18 @@ export function client(ctx, deps) {
     if (button.getAttribute('data-state') !== mode) button.setAttribute('data-state', mode)
     const disabled = read.latest === null ? 'true' : 'false'
     if (button.getAttribute('aria-disabled') !== disabled) button.setAttribute('aria-disabled', disabled)
+    const kind = read.latest === null ? 'none' : read.latest.kind
+    const badge = badgeState(kind)
+    if (refs.badge !== null && refs.badge.getAttribute('data-state') !== badge) {
+      refs.badge.setAttribute('data-state', badge)
+    }
     let label = t('ringEmpty')
     if (read.latest !== null) {
       label = read.running === 0
         ? t('ringOpen', { title: read.latest.title })
         : t('ringOpenLive', { title: read.latest.title })
+      if (badge === 'waiting') label = `${label} · ${t('badgeWaiting')}`
+      else if (badge === 'unread') label = `${label} · ${t('badgeUnread')}`
     }
     if (button.getAttribute('title') !== label) {
       button.setAttribute('title', label)
@@ -1265,6 +1368,9 @@ export function client(ctx, deps) {
   }
   subscribe(deps && deps.workspaces && deps.workspaces.list)
   subscribe(deps && deps.sessions && deps.sessions.list)
+  // Liveness lives in its own map: a turn finishes unread, then gets read, with
+  // the session list itself unchanged.
+  subscribe(deps && deps.uiSession && deps.uiSession.sessionStatus)
   if (locale && typeof locale.subscribe === 'function') {
     subscriptions.push(locale.subscribe(() => {
       applyCopy()
@@ -1296,6 +1402,7 @@ export function client(ctx, deps) {
     refs.model = null
     refs.history = null
     refs.runs = null
+    refs.badge = null
     refs.status = null
   }
 }
