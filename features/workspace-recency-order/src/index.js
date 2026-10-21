@@ -1953,7 +1953,10 @@ function orderLevel(container, workspaces, topLevel, data, view) {
     if (pair.workspace !== null && !sectionPairingTrusted(pair.section, pair.workspace)) return
   }
   // W-1 group layer: freshest activity first, no-activity last, ties keep
-  // the host's existing order (stable sort on the original index).
+  // the host's existing order (stable sort on the original index). The
+  // ungrouped bucket is exempt: it always sinks below every workspace, however
+  // fresh its stray sessions are (user rule, v0.5.17) — a session with no
+  // workspace must never push an ordinary workspace down.
   const ranked = pairs.map((pair, index) => {
     const base = pair.workspace === null
       ? bucketActivity(data)
@@ -1972,6 +1975,10 @@ function orderLevel(container, workspaces, topLevel, data, view) {
     return { section: pair.section, workspace: pair.workspace, index, activity }
   })
   ranked.sort((a, b) => {
+    // The bucket is pinned last: paired before the activity comparison, so no
+    // boost, recency or tie-break can lift it.
+    if (a.workspace === null && b.workspace !== null) return 1
+    if (b.workspace === null && a.workspace !== null) return -1
     if (a.activity === b.activity) return a.index - b.index
     if (a.activity === Number.NEGATIVE_INFINITY) return 1
     if (b.activity === Number.NEGATIVE_INFINITY) return -1

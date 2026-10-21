@@ -1142,9 +1142,10 @@ test('archiving every conversation of a workspace leaves the section pinned', as
     'A keeps rank 0 with every member archived; B does not slide up')
 })
 
-test('archiving a stray conversation does not move the ungrouped bucket', async () => {
-  // bucketActivity follows the same ruler: the stray session at 500 keeps the
-  // bucket first whether or not it is archived.
+test('the ungrouped bucket always sits below the workspaces, archived or not', async () => {
+  // User rule (v0.5.17): the bucket is pinned last before activity is even
+  // compared, so the stray session at 500 — freshest in the tree — still
+  // leaves A above it, and hiding that stray row changes nothing.
   const sessions = [session('a1', 'A one', 100), session('x1', 'X one', 500)]
   const workspaces = [{ workspaceId: 'wa', path: '/proj/A', title: 'A', sessionIds: ['a1'] }]
   const open = await paint({
@@ -1164,9 +1165,32 @@ test('archiving a stray conversation does not move the ungrouped bucket', async 
       { title: '未分组', rows: [] },
     ],
   })
-  assert.deepEqual(open.map((entry) => entry.group), ['1', '0'], 'the bucket (500) outranks A (100)')
-  assert.deepEqual(archived.map((entry) => entry.group), ['1', '0'],
-    'archiving the stray session leaves the bucket where it was')
+  assert.deepEqual(open.map((entry) => entry.group), ['0', '1'], 'A leads even though the stray row is newer')
+  assert.deepEqual(archived.map((entry) => entry.group), ['0', '1'],
+    'archiving the stray session leaves the bucket at the bottom either way')
+})
+
+test('a bucket holding a running stray session still ranks last', async () => {
+  // The liveness boost lifts a group to "now"; it must not reach the bucket.
+  const now = Date.now()
+  const { sections, rows, tearDown } = await mount({
+    sections: [
+      { title: 'A', rows: [{ id: 'a1', text: 'A one6分钟' }] },
+      { title: '未分组', rows: [{ id: 'x1', text: 'X one6分钟' }] },
+    ],
+    sessions: [session('a1', 'A one', now - 30 * HOUR_MS), session('x1', 'X one', now - 30 * HOUR_MS)],
+    workspaces: [{ workspaceId: 'wa', path: '/proj/A', title: 'A', sessionIds: ['a1'] }],
+    uiSession: makeUiSession({ x1: PENDING_STATUS }),
+  })
+  try {
+    assert.equal(sections[0].section.style.order, '0', 'the workspace leads')
+    assert.equal(sections[1].section.style.order, '1', 'the boosted bucket is still last')
+    assert.equal(sections[0].section.style.marginTop, '0px')
+    assert.equal(sections[1].section.style.marginTop, '4px')
+    assert.equal(rows.a1.style.order, '10', 'the row layer is untouched')
+  } finally {
+    tearDown()
+  }
 })
 
 test('a pinned session keeps the host front position while the rest is ranked', async () => {

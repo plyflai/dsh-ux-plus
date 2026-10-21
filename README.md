@@ -41,7 +41,7 @@ Each row lists only what you can see and do in the interface.
 | --- | --- | --- |
 | **Workspace quick search** | • Below 【Automation tasks】, always one row; yields when the sidebar collapses to the rail<br>• Type one line, press Enter: an ordinary Session starts — no workspace, no name to invent<br>• Model: the small icon on the right; leave it alone to follow the host default<br>• History: the clock icon, last 50 searches, one click back to that Session<br>• Bubble: one click returns to your newest search Session; a dot lights while one runs<br>• Search Sessions stay out of the sidebar; switch the feature off and they come back | <img src="docs/images/quick-search.png" width="170" alt="The search box that sits above the workspace list"> |
 | **Tab attention marker** | • A Session is working: the whale on the tab breathes slowly<br>• Something finished unseen: the whale turns green, the same green as the list dot<br>• Something waits for you: an orange dot blinks in the corner<br>• Neither: the host's own icon comes back; subagents and blank Sessions never light it | — |
-| **Recency order** | • Sessions running or touched today fold into a pale-green Active block, history below it<br>• State dots: orange (waiting for you), blue (running), green (finished unseen)<br>• Expand through the host's own 【show N more】, pinned right under the block<br>• Newest on top; a workspace with running or waiting members moves up too<br>• Idle for more than a day: the workspace folds away; hover a row to see how long ago<br>• Only the visible order changes; the host's grouping and sort settings stay put | <img src="docs/images/recency-expanded.png" width="170" alt="The Active block and the pinned expand button"> |
+| **Recency order** | • Sessions running or touched today fold into a pale-green Active block, history below it<br>• State dots: orange (waiting for you), blue (running), green (finished unseen)<br>• Expand through the host's own 【show N more】, pinned right under the block<br>• Newest on top; a workspace with running or waiting members moves up too<br>• 【Ungrouped】 always sinks to the bottom, however new it is<br>• Idle for more than a day: the workspace folds away; hover a row to see how long ago<br>• Only the visible order changes; the host's grouping and sort settings stay put | <img src="docs/images/recency-expanded.png" width="170" alt="The Active block and the pinned expand button"> |
 | **Conversation type size and width** | • Settings → General → Conversation<br>• Five type sizes, four reading widths<br>• Applies at once and only to conversation content | <img src="docs/images/typography.png" width="170" alt="Rendered conversation"> |
 | **Copy Session ID** | • One click in the Session row menu<br>• If the browser refuses, the menu says so in place; click again | <img src="docs/images/session-menu.png" width="170" alt="The Session menu"> |
 | **Inherit conversation** | • Same menu: pick 【Inherit conversation】, choose a model<br>• A new Session opens in the current workspace and carries on from the old one; the original is untouched<br>• On failure the picker stays open so you can retry | <img src="docs/images/inherit-picker.png" width="170" alt="The inherit picker"> |
@@ -98,6 +98,8 @@ Most recent first — the project you were just in stays at the top. Visual orde
 <td width="50%"><img src="docs/images/recency-folded.png" width="100%" alt="Folded: Active block, button pinned below it"></td>
 <td width="50%"><img src="docs/images/recency-expanded.png" width="100%" alt="Expanded: all rows visible, button at the bottom"></td>
 </tr></table>
+
+**The ungrouped bucket sinks.** Sessions that belong to no workspace share the 【Ungrouped】 section, which always sits at the very bottom — a fresh, even running, stray session never pushes a workspace down.
 
 **Idle tidying.** A workspace with no activity for over 24 hours collapses once when the page opens, and shows its age on hover (now / Nm / Nh / Nd). Workspaces holding a running or awaiting session are never auto-collapsed.
 
@@ -156,11 +158,11 @@ npm run build   # tsdown emits lib/client.js (classic script, committed to the r
 
 The five most recent entries; full history in [CHANGELOG.md](CHANGELOG.md).
 
+- **v0.5.17 · 2026-10-21** — 【Ungrouped】 is pinned to the bottom of the sidebar workspace list: a stray session that was just used, or is even running, can no longer push a workspace down.
 - **v0.5.16 · 2026-10-21** — The previews are capped at 170px, so the Interaction detail column roughly doubles (270px → 575px) instead of the screenshot taking half the table. Docs only.
 - **v0.5.15 · 2026-10-21** — The Features table is trimmed to what you can see and do: timings, percentages and other internals are gone. Docs only.
 - **v0.5.14 · 2026-10-21** — The Features table now carries the full interaction detail of all seven features as bullets: triggers, visible states, how failures read, and what switching a feature off leaves behind. Behaviours that used to live only in the code — the newest row floating to the top, a workspace moving up by recency — are spelled out. Docs only.
 - **v0.5.13 · 2026-10-20** — The update log lists only the five most recent entries, newest first, with earlier versions in `CHANGELOG.md`; the 0.5.8–0.5.12 bullets that had been appended below 0.5.1 are gone from here and the ordering is fixed. No code change.
-- **v0.5.12 · 2026-10-20** — The running ring became a chat bubble: no number any more, one click still returns to your newest search session, and a dot lights up and breathes inside it while a search runs (still under reduced motion). Both doc screenshots were redrawn with the new glyph.
 
 ## License
 

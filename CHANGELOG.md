@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.5.17 — 2026-10-21
+
+- 【未分组】桶固定沉底：`orderLevel` 的比较器在比较 activity 之前先把 bucket 这一对分出来（`a.workspace === null` → 排后），所以 24 小时活跃度、运行中加成、并列时的宿主顺序都不可能把它抬上去。
+- 之前 bucket 与工作区同台按 activity 竞争：只要有一条没有工作区的会话刚聊过（或正在跑），【未分组】就会顶到最上面，把真正的工作区挤下去。
+- 行层不受影响：bucket 内的行仍按 zone + recency 排（`orderRows` 用的还是宿主自己的 ungrouped account）。
+- 测试 59 条：把原来「archiving a stray conversation does not move the ungrouped bucket」改写成「bucket 永远在工作区下方，归档与否都一样」，新增「bucket 里有一条 pending（liveness boost 到 now）时仍然最后」。
+- 文档：功能表 recent-activity 行加一条 bullet，功能详解补「未分组沉底」一段。
+
 ## 0.5.16 — 2026-10-21
 
 Docs only, no source or bundle change.
