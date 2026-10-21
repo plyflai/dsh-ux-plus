@@ -145,6 +145,7 @@ const INSTANCE_TOKEN = `${ROOT_VALUE}-${Date.now().toString(36)}-${Math.random()
 /** Host row-key prefixes (ui-workspace `Rows.tsx:245,590`). */
 const WORKSPACE_ROW_PREFIX = 'workspace:'
 const SESSION_ROW_PREFIX = 'session:'
+const OVERFLOW_ROW_PREFIX = 'overflow:'
 
 /**
  * `<home>/.dsh-ux-plus/search` using the home's own separator, or null when the
@@ -174,11 +175,15 @@ function cssString(value) {
 /**
  * The stylesheet that removes the private workspace from the sidebar.
  *
- * Two rules per workspace: the group wrapper (the element whose DIRECT child is
- * the workspace row — `*:has(> …)` also collapses the wrapper's own spacing, so
- * an empty group leaves no gap) and the row itself (for group-by modes that
- * render the row without that wrapper). Session rows are listed by id because
- * some list modes (`groupBy: 'flat'`) render sessions without the wrapper.
+ * Three rules per workspace, because the host nests the row one level deeper
+ * than the group it heads: `HoverCard` wraps the project row in its own `<span>`,
+ * so the row's DIRECT parent is that span, not the section that also holds the
+ * session rows and the "expand N more" button. Hiding only the direct parent
+ * therefore left an untitled section behind — a stray gap holding nothing but a
+ * fold button. The rules also collapse the section (`> * >` reaches through the
+ * hover-card span), the row itself (for group-by modes that render it without
+ * that wrapper) and the section's overflow button. Session rows are listed by id
+ * because some list modes (`groupBy: 'flat'`) render sessions without a group.
  * @param {string | null | undefined} workspaceId - the private workspace id.
  * @param {Iterable<string>} sessionIds - sessions the workspace owns.
  * @returns {string} CSS text ('' when nothing is known yet).
@@ -187,8 +192,10 @@ export function hiddenCss(workspaceId, sessionIds) {
   const lines = []
   if (typeof workspaceId === 'string' && workspaceId !== '') {
     const key = cssString(`${WORKSPACE_ROW_PREFIX}${workspaceId}`)
+    lines.push(`*:has(> * > [data-row-key=${key}]) { display: none !important; }`)
     lines.push(`*:has(> [data-row-key=${key}]) { display: none !important; }`)
     lines.push(`[data-row-key=${key}] { display: none !important; }`)
+    lines.push(`[data-row-key=${cssString(`${OVERFLOW_ROW_PREFIX}${workspaceId}`)}] { display: none !important; }`)
   }
   const seen = new Set()
   for (const sessionId of sessionIds || []) {

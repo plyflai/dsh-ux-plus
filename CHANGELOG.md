@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.5.18 — 2026-10-21
+
+- 修掉隐藏工作区在侧边栏留下的空块。宿主把工作区标题行包在 `HoverCard` 自己的 `<span>` 里，所以标题行的**直接父元素**不是那个同时装着会话行和【展开其余 N 个会话】的分组（`div.groupSection`），而是这层 span。原来的 `*:has(> [data-row-key="workspace:<id>"])` 只藏住了 span，分组里还剩边距和折叠按钮——看上去就是一个没有标题、只有「展开其余 1 个会话」的空工作区。
+- `hiddenCss()` 现在多两条规则：`*:has(> * > [data-row-key="workspace:<id>"])` 穿过 hover-card 那层 span 把整个分组收走，外加 `[data-row-key="overflow:<workspaceId>"]` 兜住分组自己的折叠按钮。新增常量 `OVERFLOW_ROW_PREFIX = 'overflow:'`。
+- 浏览器前后对照（同构合成 DOM + 真实生成的 CSS）：旧规则下 `visibleSections` 含隐藏分组、`strayFoldVisible: true`；新规则下该分组不可见、无游离折叠按钮，其余分组高度不变。
+- 测试 138/138（hiddenCss 那条改为断言四条规则）。
+
 ## 0.5.17 — 2026-10-21
 
 - 【未分组】桶固定沉底：`orderLevel` 的比较器在比较 activity 之前先把 bucket 这一对分出来（`a.workspace === null` → 排后），所以 24 小时活跃度、运行中加成、并列时的宿主顺序都不可能把它抬上去。

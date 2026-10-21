@@ -339,11 +339,15 @@ test('searchWorkspacePath agrees with the host half on both separators', async (
   assert.equal(searchWorkspacePath(''), null)
 })
 
-test('hiddenCss hides the group wrapper, the row, and every owned session', async () => {
+test('hiddenCss hides the whole group section, its fold button, and every owned session', async () => {
   const { hiddenCss } = await import(moduleUrl.href)
   const css = hiddenCss('ws-search', ['s1', 's2', 's1'])
+  // The row sits one level below the group section (HoverCard wraps it in a span),
+  // so the section is reached through one intermediate element.
+  assert.ok(css.includes('*:has(> * > [data-row-key="workspace:ws-search"]) { display: none !important; }'), css)
   assert.ok(css.includes('*:has(> [data-row-key="workspace:ws-search"]) { display: none !important; }'), css)
   assert.ok(css.includes('[data-row-key="workspace:ws-search"] { display: none !important; }'), css)
+  assert.ok(css.includes('[data-row-key="overflow:ws-search"] { display: none !important; }'), css)
   assert.ok(css.includes('[data-row-key="session:s1"] { display: none !important; }'), css)
   assert.equal(css.split('session:s1').length - 1, 1, 'duplicate session ids collapse')
   assert.equal(hiddenCss(null, []), '', 'nothing known yet means no rule')

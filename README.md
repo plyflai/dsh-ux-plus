@@ -158,11 +158,11 @@ npm run build   # tsdown emits lib/client.js (classic script, committed to the r
 
 The five most recent entries; full history in [CHANGELOG.md](CHANGELOG.md).
 
+- **v0.5.18 · 2026-10-21** — No more empty block left by the hidden workspace: only its title row and session rows used to be hidden, so the sidebar kept an untitled strip holding nothing but 【show N more】. The whole section is taken away now.
 - **v0.5.17 · 2026-10-21** — 【Ungrouped】 is pinned to the bottom of the sidebar workspace list: a stray session that was just used, or is even running, can no longer push a workspace down.
 - **v0.5.16 · 2026-10-21** — The previews are capped at 170px, so the Interaction detail column roughly doubles (270px → 575px) instead of the screenshot taking half the table. Docs only.
 - **v0.5.15 · 2026-10-21** — The Features table is trimmed to what you can see and do: timings, percentages and other internals are gone. Docs only.
 - **v0.5.14 · 2026-10-21** — The Features table now carries the full interaction detail of all seven features as bullets: triggers, visible states, how failures read, and what switching a feature off leaves behind. Behaviours that used to live only in the code — the newest row floating to the top, a workspace moving up by recency — are spelled out. Docs only.
-- **v0.5.13 · 2026-10-20** — The update log lists only the five most recent entries, newest first, with earlier versions in `CHANGELOG.md`; the 0.5.8–0.5.12 bullets that had been appended below 0.5.1 are gone from here and the ordering is fixed. No code change.
 
 ## License
 
