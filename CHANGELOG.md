@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.5.20 — 2026-10-21
+
+- 文档：`docs/images/quick-search-badges.png`（560 宽，来自真实 `boxCss()` 的渲染）补进【工作区快速搜索】/【Workspace quick search】的元素表下方，把气泡右上角的绿点（跑完没看）与橙点（等你回复）、以及历史弹窗每行同样的点画出来。
+- 两种语言的 alt 文案都写明「绿＝跑完没看、橙＝等你回复」，不依赖颜色本身传达状态。
+
 ## 0.5.19 — 2026-10-21
 
 - 气泡状态点：`readSearches()` 现在给每条搜索会话带一个 `kind`，来源是宿主的 liveness 映射 `deps.uiSession.sessionStatus`（`{running, pendingInteraction, completionUnread}`）经已有的 `statusKind()` 归一化。优先级沿用宿主状态点：待回复 > 运行中 > 跑完没看 > 无。

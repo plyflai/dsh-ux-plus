@@ -63,6 +63,8 @@ A search box sits permanently under **Automated tasks** in the sidebar and drops
 | Clock icon (right) | Opens history: the last 50 searches, one click reopens that session, one button clears the list. Each row carries the same dot — green for an unread answer, amber for a pending question |
 | Sidebar | Search sessions **never show up** — they all live in the hidden workspace |
 
+![Top-right of the bubble: green when an answer landed unread, amber when it is waiting for you; the history rows carry the same dots](docs/images/quick-search-badges.png)
+
 - The hidden workspace is `.dsh-ux-plus/search` in your home directory, created on first use. It is not in the workspace list and has no group in the session tree, yet the history popup still takes you back to any old search session.
 - The box only appears while the sidebar is expanded; in the collapsed rail it steps aside.
 - Turning the switch off removes the hidden-workspace rule too — those sessions simply reappear in the sidebar, nothing is lost.
@@ -158,11 +160,11 @@ npm run build   # tsdown emits lib/client.js (classic script, committed to the r
 
 The five most recent entries; full history in [CHANGELOG.md](CHANGELOG.md).
 
+- **v0.5.20 · 2026-10-21** — the quick-search docs now show the state dots: a green corner dot on the bubble for an unread answer, amber for a pending reply, and on every history row.
 - **v0.5.19 · 2026-10-21** — The session bubble at the right end of the search box carries a state dot: green when an answer finished and is still unread, amber when a turn is waiting for your reply. The history popup shows the same dots beside each search.
 - **v0.5.18 · 2026-10-21** — No more empty block left by the hidden workspace: only its title row and session rows used to be hidden, so the sidebar kept an untitled strip holding nothing but 【show N more】. The whole section is taken away now.
 - **v0.5.17 · 2026-10-21** — 【Ungrouped】 is pinned to the bottom of the sidebar workspace list: a stray session that was just used, or is even running, can no longer push a workspace down.
 - **v0.5.16 · 2026-10-21** — The previews are capped at 170px, so the Interaction detail column roughly doubles (270px → 575px) instead of the screenshot taking half the table. Docs only.
-- **v0.5.15 · 2026-10-21** — The Features table is trimmed to what you can see and do: timings, percentages and other internals are gone. Docs only.
 
 ## License
 
