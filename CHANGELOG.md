@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.5.21 — 2026-10-21
+
+- 位置：输入框从工作区列表顶上搬到【新建会话】按钮正下方、面板导航（自动化任务 / 扩展）上方。宿主侧边栏在导航和 `regionArea` 之间没有插槽，所以节点插在面板 `<nav>` 之前（`region.previousElementSibling`，结构定位、不认哈希类名），仍然由同一个 MutationObserver 守着；拿不到 region（rail 窄栏）时照旧不出现。
+- 几何：落进侧边栏列之后，列本身已经带 12px 内边距，外框改为 `padding: 0 0 6px`——输入区左沿与下方会话行左沿对齐、气泡右沿与行右沿对齐（实测 32→288，与新建会话按钮同宽），上方 12px（按钮自身外边距）、下方 6px（到导航）。
+- 文案：提示语与可访问名改为「直接问，不用新建会话」/「Just ask, no new session」；设置项与文档里的功能名从「工作区快速搜索」/「Workspace quick search」改为「直接问」/「Quick ask」，README 锚点同步。
+- 文档：`docs/images/quick-search.png`、`quick-search-typed.png`、`quick-search-badges.png` 全部按真实 `boxCss()` 重画成新位置（含【新建会话】按钮与面板导航作为参照）。
+- 测试：mount 用例改为断言「输入框在 `<nav>` 之前、父节点是该列」，并新增重排 churn 不叠第二份的断言；`nextElementSibling` 加进 fake DOM。139 tests pass。
+
 ## 0.5.20 — 2026-10-21
 
 - 文档：`docs/images/quick-search-badges.png`（560 宽，来自真实 `boxCss()` 的渲染）补进【工作区快速搜索】/【Workspace quick search】的元素表下方，把气泡右上角的绿点（跑完没看）与橙点（等你回复）、以及历史弹窗每行同样的点画出来。

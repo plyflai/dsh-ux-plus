@@ -71,6 +71,13 @@ function node(tag) {
       return index > 0 ? el.parentNode.children[index - 1] : null
     },
   })
+  Object.defineProperty(el, 'nextElementSibling', {
+    get: () => {
+      if (el.parentNode === null) return null
+      const index = el.parentNode.children.indexOf(el)
+      return index >= 0 && index < el.parentNode.children.length - 1 ? el.parentNode.children[index + 1] : null
+    },
+  })
   el.setAttribute = (key, value) => { el.attributes[key] = String(value) }
   el.getAttribute = (key) => (key in el.attributes ? el.attributes[key] : null)
   el.removeAttribute = (key) => { delete el.attributes[key] }
@@ -321,8 +328,9 @@ async function mount(env, ctx, deps) {
   const module = await import(moduleUrl.href)
   const dispose = module.feature.client(ctx, deps)
   const region = env.sidebar === null ? null : env.sidebar.region
-  const rootNode = region === null ? null : region.children[0]
-  return { module, dispose, region, rootNode }
+  const nav = env.sidebar === null ? null : env.sidebar.nav
+  const rootNode = env.sidebar === null ? null : pick(env.sidebar.sidebar, 'data-dsh-ux-plus', 'quick-search')
+  return { module, dispose, region, nav, rootNode }
 }
 
 /** Type into the box and press Enter. */
@@ -417,21 +425,23 @@ test('locateBrowserRegion finds the region above the tree, and nothing in rail m
 // Mount / dispose.
 // ---------------------------------------------------------------------------
 
-test('mount inserts the box as the region first child and dispose removes every trace', async () => {
+test('mount seats the box directly under the New Session button and dispose removes every trace', async () => {
   const env = makeEnv()
   installGlobals(env)
   try {
     const { ctx } = makeCtx()
     const { deps, sessions, workspaces } = makeDeps()
-    const { dispose, region, rootNode } = await mount(env, ctx, deps)
+    const { dispose, region, nav, rootNode } = await mount(env, ctx, deps)
 
-    assert.equal(region.children[0], rootNode, 'the box is the region first child')
+    assert.equal(rootNode.parentNode, nav.parentNode, 'the box lives in the sidebar column, not the region')
+    assert.equal(rootNode.nextElementSibling, nav, 'the box sits immediately before the panel nav, i.e. under the New Session button')
+    assert.equal(region.children[0], env.sidebar.browser, 'the region is left exactly as the host rendered it')
     assert.equal(rootNode.getAttribute('data-dsh-ux-plus'), 'quick-search')
     assert.ok(rootNode.getAttribute('data-ux-plus-instance'), 'our box carries the instance token')
     const input = pick(rootNode, 'data-qs', 'input')
     assert.ok(input, 'the field holds an input')
-    assert.equal(input.getAttribute('placeholder'), '直接搜，不用工作区', 'the hint is the bare sentence, no parentheses')
-    assert.equal(input.getAttribute('aria-label'), '直接搜，不用工作区', 'the accessible name follows the same copy')
+    assert.equal(input.getAttribute('placeholder'), '直接问，不用新建会话', 'the hint is the bare sentence, no parentheses')
+    assert.equal(input.getAttribute('aria-label'), '直接问，不用新建会话', 'the accessible name follows the same copy')
     assert.equal(env.document.head.children.length, 2, 'one sheet for the box, one for the hidden workspace')
     assert.ok(env.document.head.children[0].textContent.includes('[data-qs="field"]'))
     const sheet = env.document.head.children[0].textContent
@@ -478,13 +488,11 @@ test('mount inserts the box as the region first child and dispose removes every 
       'running lights the glyph up to the primary label color',
     )
     assert.ok(fieldCss.includes('[data-ux-plus-instance]'), 'our geometry rules are instance-scoped, so a stale sheet cannot restyle them')
-    // The sidebar region is inset asymmetrically; the box must flush with the list band,
-    // so its left edge lines up with the rows and its right edge with the header controls.
+    // Under the New Session button the sidebar column already carries its own
+    // inline padding, so the frame adds none: the field's left edge lines up with
+    // the rows' left edge and the bubble with their right edge.
     const scopeCss = rule('[data-dsh-ux-plus="quick-search"][data-ux-plus-instance] {')
-    assert.ok(
-      /padding: 6px var\(--dsh-session-list-edge-inset, 12px\) 6px 0/.test(scopeCss),
-      'the box takes the host right inset and no left inset',
-    )
+    assert.ok(/padding: 0 0 6px/.test(scopeCss), 'the frame adds no inline padding in the column')
     // The hint is a hint: italic and partly transparent so typed text reads as the content.
     const hintCss = rule('[data-qs="input"]::placeholder')
     assert.ok(/font-style: italic/.test(hintCss), 'the placeholder is italic')
@@ -494,15 +502,20 @@ test('mount inserts the box as the region first child and dispose removes every 
     assert.equal(env.observers.length, 1)
     assert.equal(env.observers[0].disconnected, false)
 
-    // Re-render churn: the box is re-placed instead of duplicated.
-    env.sidebar.region.insertBefore(node('div'), env.sidebar.browser)
+    // Re-render churn: the box is re-placed under the New Session button instead
+    // of duplicated (React re-renders the column around our unmanaged child).
+    env.sidebar.sidebar.insertBefore(node('div'), env.sidebar.nav)
     env.observers[0].callback()
     env.flushTimers()
-    assert.equal(region.children[0], rootNode)
-    assert.equal(collect(region, (el) => el.getAttribute('data-dsh-ux-plus') === 'quick-search').length, 1)
+    assert.equal(rootNode.nextElementSibling, nav, 'the box is put back directly under the button')
+    assert.equal(
+      collect(env.sidebar.sidebar, (el) => el.getAttribute('data-dsh-ux-plus') === 'quick-search').length,
+      1,
+      'churn never stacks a second box',
+    )
 
     dispose()
-    assert.equal(region.children.includes(rootNode), false, 'dispose removes the box')
+    assert.equal(env.sidebar.sidebar.children.includes(rootNode), false, 'dispose removes the box')
     assert.equal(env.document.head.children.length, 0, 'dispose removes both sheets')
     assert.equal(env.observers[0].disconnected, true)
     assert.equal(sessions.subscribeCount(), 0)

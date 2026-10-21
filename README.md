@@ -19,9 +19,9 @@ You just want to look something up, and the price used to be: create a workspace
 - the clock icon on the right is history: your last 50 searches, one click back to that session
 - the hidden workspace is `.dsh-ux-plus/search` under your home directory, created on first use and never shown in the sidebar
 
-![The search box sitting above the workspace list](docs/images/quick-search.png)
+![The box sitting under New session](docs/images/quick-search.png)
 
-[Details →](#workspace-quick-search)
+[Details →](#quick-ask)
 
 ## New in 0.4.0 — the tab tells you what's happening
 
@@ -39,7 +39,7 @@ Each row lists only what you can see and do in the interface.
 
 | Feature | Interaction detail | Preview |
 | --- | --- | --- |
-| **Workspace quick search** | • Below 【Automation tasks】, always one row; yields when the sidebar collapses to the rail<br>• Type one line, press Enter: an ordinary Session starts — no workspace, no name to invent<br>• Model: the small icon on the right; leave it alone to follow the host default<br>• History: the clock icon, last 50 searches, one click back to that Session<br>• Bubble: one click returns to your newest search Session; a dot lights inside while it runs — green when an answer is unread, amber when a turn waits on you<br>• Search Sessions stay out of the sidebar; switch the feature off and they come back | <img src="docs/images/quick-search.png" width="170" alt="The search box that sits above the workspace list"> |
+| **Quick ask** | • Below 【New session】, always one row; yields when the sidebar collapses to the rail<br>• Type one line, press Enter: an ordinary Session starts — no workspace, no name to invent<br>• Model: the small icon on the right; leave it alone to follow the host default<br>• History: the clock icon, last 50 searches, one click back to that Session<br>• Bubble: one click returns to your newest search Session; a dot lights inside while it runs — green when an answer is unread, amber when a turn waits on you<br>• Search Sessions stay out of the sidebar; switch the feature off and they come back | <img src="docs/images/quick-search.png" width="170" alt="The box that sits under New session"> |
 | **Tab attention marker** | • A Session is working: the whale on the tab breathes slowly<br>• Something finished unseen: the whale turns green, the same green as the list dot<br>• Something waits for you: an orange dot blinks in the corner<br>• Neither: the host's own icon comes back; subagents and blank Sessions never light it | — |
 | **Recency order** | • Sessions running or touched today fold into a pale-green Active block, history below it<br>• State dots: orange (waiting for you), blue (running), green (finished unseen)<br>• Expand through the host's own 【show N more】, pinned right under the block<br>• Newest on top; a workspace with running or waiting members moves up too<br>• 【Ungrouped】 always sinks to the bottom, however new it is<br>• Idle for more than a day: the workspace folds away; hover a row to see how long ago<br>• Only the visible order changes; the host's grouping and sort settings stay put | <img src="docs/images/recency-expanded.png" width="170" alt="The Active block and the pinned expand button"> |
 | **Conversation type size and width** | • Settings → General → Conversation<br>• Five type sizes, four reading widths<br>• Applies at once and only to conversation content | <img src="docs/images/typography.png" width="170" alt="Rendered conversation"> |
@@ -49,15 +49,15 @@ Each row lists only what you can see and do in the interface.
 
 ## Feature details
 
-### Workspace quick search
+### Quick ask
 
-A search box sits permanently under **Automated tasks** in the sidebar and drops the "create a workspace first" step: ask or search right away — type, press Enter, and an ordinary session opens (same UI as any other session) while filing itself into a hidden workspace, out of your sidebar.
+A box sits permanently under **New session** in the sidebar and drops both "create a workspace first" and "start a new session" steps: ask or search right away — type, press Enter, and an ordinary session opens (same UI as any other session) while filing itself into a hidden workspace, out of your sidebar.
 
-![The box sits above the workspace list: magnifier on the left, model, history and session-bubble icons on the right, one faint italic hint when empty](docs/images/quick-search.png)
+![The box sits under **New session**: magnifier on the left, model, history and session-bubble icons on the right, one faint italic hint when empty](docs/images/quick-search.png)
 
 | Element | Behaviour |
 | --- | --- |
-| Search box (magnifier on the left) | Enter searches straight away (the field is single-line); an Enter that ends an IME composition never submits by accident |
+| Input (magnifier on the left) | Enter searches straight away (the field is single-line); an Enter that ends an IME composition never submits by accident |
 | Model picker | A small chip icon on the right: click it for the model list (the current pick is ticked). Leave it alone to use the host default; a non-default pick puts a dot on the chip and is remembered locally |
 | Session bubble (far right) | One click returns to the newest search session, finished or not. While a search is running a dot lights inside the bubble and breathes — never a number. A small corner dot carries the state: **green** = the answer arrived and is unread, **amber** = a turn is waiting for your reply. Dim and inert while there is no search session yet |
 | Clock icon (right) | Opens history: the last 50 searches, one click reopens that session, one button clears the list. Each row carries the same dot — green for an unread answer, amber for a pending question |
@@ -160,6 +160,7 @@ npm run build   # tsdown emits lib/client.js (classic script, committed to the r
 
 The five most recent entries; full history in [CHANGELOG.md](CHANGELOG.md).
 
+- **v0.5.21 · 2026-10-21** — The box moves to just under 【New session】 (it used to sit above 【Automation tasks】, on top of the workspace list); the hint is now "Just ask, no new session" and the feature is called "Quick ask".
 - **v0.5.20 · 2026-10-21** — the quick-search docs now show the state dots: a green corner dot on the bubble for an unread answer, amber for a pending reply, and on every history row.
 - **v0.5.19 · 2026-10-21** — The session bubble at the right end of the search box carries a state dot: green when an answer finished and is still unread, amber when a turn is waiting for your reply. The history popup shows the same dots beside each search.
 - **v0.5.18 · 2026-10-21** — No more empty block left by the hidden workspace: only its title row and session rows used to be hidden, so the sidebar kept an untitled strip holding nothing but 【show N more】. The whole section is taken away now.

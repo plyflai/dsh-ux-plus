@@ -10,13 +10,15 @@
  *
  * Why each piece of the implementation looks the way it does:
  *
- *   - Placement. The host exposes no slot between the sidebar's panel list and
- *     the workspace region (ui-sidebar `SidebarRoot.tsx:280` renders `<nav
- *     class=panelList>` and `:297` renders `<div class=regionArea>` around the
- *     `sidebar.workspaces` slot), so the box is inserted as the region's FIRST
- *     child and kept alive by one MutationObserver. When the region is not
- *     rendered — the sidebar sits in its 56px rail — the box is simply absent
- *     (no error, no half-mounted state).
+ *   - Placement. The box sits directly under the New Session button, i.e. right
+ *     before the panel nav the sidebar renders at `SidebarRoot.tsx:280`; the
+ *     seat is found from the workspace tree (`[role="tree"]`), walking up to the
+ *     region whose previous sibling is that `<nav>`, then taking the nav's
+ *     parent as the insertion point. No host slot fits there, so the node is
+ *     kept alive by one MutationObserver. If the nav ever disappears the box
+ *     falls back to being the region's first child; while the sidebar sits in
+ *     its 56px rail there is no tree at all and the box is simply absent (no
+ *     error, no half-mounted state).
  *   - Plain DOM, not a React tree: the box must survive every remount of the
  *     workspace browser, which is exactly why the sibling DOM features are
  *     plain DOM too (and why the settings-tab switch can mount/unmount us with
@@ -45,20 +47,20 @@
 /** Stable feature id — also the per-feature switch key in the `ux-plus` section. */
 export const id = 'workspace-quick-search'
 /** Settings-row title (English constant; the settings tab localizes it). */
-export const title = 'Quick search box'
+export const title = 'Quick ask'
 /** Settings-row description fallback. */
-export const description = 'Put a search box above the workspace list: type a question, press Enter and a normal session opens in a background workspace the sidebar never lists. The clock icon lists the last 50 searches.'
+export const description = 'Ask the model without setting up a session: type a question under the New Session button, press Enter, and a normal session opens by itself in a background workspace the sidebar never lists. The clock icon lists the last 50 asks.'
 /** No gear: the box has no per-feature options beyond the switch itself. */
 export const hasGear = false
 /** Settings-row copy, assembled into the `ux-plus-settings` namespace. */
 export const settingsMessages = {
   zh: {
-    title: '快速搜索框',
-    description: '在「自动化任务」下方常驻一个搜索框：输入后回车即开一个普通会话，会话落在后台独立工作区里、不显示在侧边栏；右侧时钟图标列出最近 50 条搜索。',
+    title: '直接问',
+    description: '在【新建会话】下方常驻一个输入框：有临时搜索或小疑问，输入后回车即开一个普通会话，会话落在后台独立工作区里、不显示在侧边栏；右侧时钟图标列出最近 50 条提问。',
   },
   en: {
-    title: 'Quick search box',
-    description: 'Put a search box above the workspace list: type a question, press Enter and a normal session opens in a background workspace the sidebar never lists. The clock icon lists the last 50 searches.',
+    title: 'Quick ask',
+    description: 'Ask the model without setting up a session: type a question under the New Session button, press Enter, and a normal session opens by itself in a background workspace the sidebar never lists. The clock icon lists the last 50 asks.',
   },
 }
 
@@ -68,7 +70,7 @@ const NS = 'ux-plus-quick-search'
 /** Every user-visible string, keyed so the active DSH locale picks the row. */
 const MESSAGES = {
   zh: {
-    placeholder: '直接搜，不用工作区',
+    placeholder: '直接问，不用新建会话',
     model: '模型',
     modelsEmpty: '还没有可用的模型',
     history: '搜索历史',
@@ -95,7 +97,7 @@ const MESSAGES = {
     days: '{n} 天前',
   },
   en: {
-    placeholder: 'Just search, no workspace',
+    placeholder: 'Just ask, no new session',
     model: 'Model',
     modelsEmpty: 'No models available yet',
     history: 'Search history',
@@ -256,6 +258,22 @@ export function locateBrowserRegion(doc) {
     node = node.parentNode
   }
   return null
+}
+
+/**
+ * Where the box sits: directly under the sidebar's New Session button, i.e.
+ * immediately before the panel nav (`SidebarRoot.tsx:280`); or — if the host
+ * ever stops rendering that nav — as the first child of the workspace region.
+ * @param {Document|null|undefined} doc - the page.
+ * @returns {{parent: object, anchor: object}|null} null while the rail is up:
+ *   no tree, no list, and the box has no seat.
+ */
+export function locateSearchSeat(doc) {
+  const region = locateBrowserRegion(doc)
+  if (region === null) return null
+  const nav = region.previousElementSibling
+  if (nav === null || nav === undefined) return null
+  return { parent: nav.parentNode, anchor: nav }
 }
 
 /**
@@ -423,11 +441,13 @@ function boxCss() {
   const scope = `[data-dsh-ux-plus="${ROOT_VALUE}"][data-ux-plus-instance]`
   const menu = `[data-dsh-ux-plus="${MENU_VALUE}"][data-ux-plus-instance]`
   return [
-    // The sidebar's region is inset asymmetrically (margin -4px left, -12px right);
-    // flush the box with the list band so its rounded rect lines up with the rows
-    // below instead of floating 8px in from the left with a wider right edge.
-    `${scope} { display: flex; flex-direction: column; gap: 3px; box-sizing: border-box; width: 100%; padding: 6px var(--dsh-session-list-edge-inset, 12px) 6px 0; }`,
-    // A superseded bundle instance leaves a marker-only node behind; hide it instead of stacking two boxes.
+    // Under the New Session button the sidebar column already carries its 12px
+    // inline padding, so the frame adds none: the field's left edge lines up with
+    // the session rows below and the bubble with their right edge. The 6px bottom
+    // padding is the gap to the panel nav that follows.
+    `${scope} { display: flex; flex-direction: column; gap: 3px; box-sizing: border-box; width: 100%; padding: 0 0 6px; }`,
+    // A superseded bundle instance leaves a marker-only node behind; hide it
+    // instead of stacking two boxes.
     `[data-dsh-ux-plus="${ROOT_VALUE}"]:not([data-ux-plus-instance]), [data-dsh-ux-plus="${MENU_VALUE}"]:not([data-ux-plus-instance]) { display: none !important; }`,
     // The box row: the shortened field, then the "running now" ring in the blank
     // it gives up on the right (20px slot + 4px gap = the field stops 24px short,
@@ -754,19 +774,18 @@ export function client(ctx, deps) {
     return root
   }
 
-  /** Insert (or re-insert) the box as the region's first child. */
+  /** Insert (or re-insert) the box immediately under the New Session button. */
   function place() {
-    const region = locateBrowserRegion(document)
-    if (region === null) {
+    const seat = locateSearchSeat(document)
+    if (seat === null) {
       // Rail mode / no list yet: the box has no seat, and must not linger.
       if (refs.root !== null && refs.root.parentNode !== null) refs.root.parentNode.removeChild(refs.root)
       closePanel()
       return
     }
     if (refs.root === null) refs.root = buildNode()
-    if (!(refs.root.parentNode === region && region.firstElementChild === refs.root)) {
-      region.insertBefore(refs.root, region.firstElementChild || null)
-    }
+    const settled = refs.root.parentNode === seat.parent && refs.root.nextElementSibling === seat.anchor
+    if (!settled) seat.parent.insertBefore(refs.root, seat.anchor)
     // The ring follows every session-list change; the pass is idempotent, so a
     // MutationObserver pass that found nothing new writes nothing.
     refreshRing()
