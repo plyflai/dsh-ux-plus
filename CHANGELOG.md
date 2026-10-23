@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.5.22 — 2026-10-23
+
+- 行为：收起再展开工作区，回到折叠态——只展开绿底的 Active 区，历史不再跟着一起回来（用户报告：混合展开）。一次【展开其余 N 个会话】会把整段会话在整页生命周期内保持展开，所以之后重新打开工作区时回放的是那次展开；现在工作区被收起、或点了标题行，都会清掉展开态。
+- 没有 Active 行的工作区不变：照宿主原生展开历史（没有可折叠的块）。
+- 实现：`orderRows()` 在读到 `aria-expanded="false"` 时 `revealed.delete(key)`；标题行也挂一个 `markSectionToggle()` 监听（收起+展开可能落在同一个合并 pass 里，DOM 上看不到收起那一帧），点完立刻走用户动作通道，不等 churn 冻结。
+- 测试：新增「re-opening a closed workspace shows the Active block only」——先按【展开其余】看全量、再收起/展开，断言历史重新隐藏且按钮钉回 Active 区下方；同一用例里再走一遍「标题点击」路径。60 recency tests pass（无修复时该用例变红）。全量 140/140。
+
 ## 0.5.21 — 2026-10-21
 
 - 位置：输入框从工作区列表顶上搬到【新建会话】按钮正下方、面板导航（自动化任务 / 扩展）上方。宿主侧边栏在导航和 `regionArea` 之间没有插槽，所以节点插在面板 `<nav>` 之前（`region.previousElementSibling`，结构定位、不认哈希类名），仍然由同一个 MutationObserver 守着；拿不到 region（rail 窄栏）时照旧不出现。

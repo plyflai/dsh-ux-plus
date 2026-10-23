@@ -134,6 +134,10 @@
  *     anti-churn freeze and waits the host's row glide out. Where every
  *     session is dormant, or the host renders no button (nothing to reuse,
  *     nothing to bring back), the section behaves exactly like the host.
+ *     Opening a CLOSED section always starts from the fold again: a click on
+ *     the workspace header (its own open/close control) drops the reveal, and
+ *     so does a pass that reads the header collapsed — 收起再展开 hence returns
+ *     the Active block, never the history an earlier 展开其余 left open.
  *   - workspace badge: the group header shows up to three 7px dots (waiting,
  *     unread, running) for the attention the Active block is hiding — never
  *     for the dormant block, whose status never floats up. The header carries
@@ -1759,6 +1763,21 @@ function compareRecency(a, b) {
 }
 
 function orderRows(section, account, data, view) {
+  // A workspace the user closed in the host drops any earlier reveal: opening
+  // it again starts from the fold, so ONLY the Active block comes back (user
+  // rule: 打开收起的工作区时只展开 live 的对话，没有 live 才按宿主原生展开
+  // 历史). Without this a single 展开其余 press kept a section fully open for
+  // the rest of the page load — 收起再展开 came back mixing live and history.
+  if (sectionExpanded(section) === false) data.revealed.delete(account.key)
+  // The header's own click is the OTHER door in and out of a section, and
+  // collapse + expand can land in one coalesced pass (so the reset above never
+  // sees the aria-expanded="false" face). Clearing here means the answering
+  // pass re-folds whatever comes back, and the user's click gets that pass
+  // immediately instead of waiting behind the churn freeze.
+  const header = sectionHeaderRow(section, 0)
+  if (header !== null && typeof data.markSectionToggle === 'function') {
+    data.markSectionToggle(header, account.key)
+  }
   const expected = renderedOrder(account.memberIds, account.key, data, view)
   const rows = rowChildren(section)
   const shown = sectionCollapsed(section) ? collapsedShown(expected, data, rows.length) : expected
@@ -2172,6 +2191,26 @@ export function client(ctx, deps) {
   }
 
   /**
+   * Mark the section header once (WeakSet: the host rebuilds the row when it
+   * re-renders, each fresh element gets its own listener). A header click is
+   * the host's own open/close of the whole section, and it always resets the
+   * reveal: opening a closed workspace must come back as the Active block
+   * only, never as everything a previous 展开其余 press left open. The pass it
+   * asks for runs through the user-action window, so it is not deferred.
+   */
+  const headerMarked = new WeakSet()
+  function markSectionToggle(element, accountKey) {
+    if (typeof element.addEventListener !== 'function') return
+    if (headerMarked.has(element)) return
+    headerMarked.add(element)
+    element.addEventListener('click', () => {
+      if (disposed) return
+      revealed.delete(accountKey)
+      onUserAction()
+    })
+  }
+
+  /**
    * Note that the user just pressed the host's overflow button (spec §7). A
    * real click ALWAYS arrives with the pointer already inside the tree —
    * pointerover fires first — so without this the churn freeze deferred the
@@ -2235,6 +2274,7 @@ export function client(ctx, deps) {
       zoneMarked,
       driftPasses,
       markUserActionOn,
+      markSectionToggle,
       onUserAction,
       styles,
     }

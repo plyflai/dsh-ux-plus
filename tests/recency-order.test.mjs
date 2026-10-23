@@ -2510,6 +2510,61 @@ test('the host overflow button is pinned below the Active block and folds the hi
   }
 })
 
+test('re-opening a closed workspace shows the Active block only, never the history it had opened', async () => {
+  // Reported live: 收起再展开 brought live and history back mixed. One press of
+  // 展开其余 reveals the section for the rest of the page load, so the next
+  // open replayed that reveal instead of the fold. A closed workspace now
+  // always drops the reveal: opening it comes back as the Active block, and a
+  // dormant-only workspace still opens like the host (nothing to fold).
+  const now = Date.now()
+  const sessions = [
+    session('l1', 'Live one', now - 30 * 60 * 1000),
+    session('d1', 'Dormant one', now - 25 * HOUR_MS),
+    session('d2', 'Dormant two', now - 26 * HOUR_MS),
+  ]
+  const status = makeUiSession({})
+  const built = await mount({
+    sections: [{
+      title: 'w1',
+      rows: [rowSpec('l1', 'Live one'), rowSpec('d1', 'Dormant one'), rowSpec('d2', 'Dormant two')],
+      button: 'collapsed',
+    }],
+    sessions,
+    workspaces: [{ workspaceId: 'w1', path: '/w1', title: 'w1', sessionIds: sessions.map((s) => s.id) }],
+    uiSession: status,
+  })
+  const { rows, button, env, tearDown } = built
+  const header = headerOf(built)
+  try {
+    button.textContent = '展开其余 2 个会话'
+    status.setStatuses({})
+    env.flushTimers()
+    assert.equal(rows.d1.style.display, 'none', 'the section starts on its Active block')
+    // 展开其余 is the one explicit "show me the history".
+    button.click()
+    env.flushTimers()
+    assert.equal(rows.d1.style.display, undefined, 'the press opens the whole section')
+    // 收起 the workspace, then open it again: the fold is back.
+    header.setAttribute('aria-expanded', 'false')
+    env.flushTimers()
+    header.setAttribute('aria-expanded', 'true')
+    env.flushTimers()
+    assert.equal(rows.d1.style.display, 'none', 're-opening shows the Active block only')
+    assert.equal(rows.d2.style.display, 'none')
+    assert.equal(button.style.order, '11', 'and the open control is pinned below it again')
+    // The header click alone clears the reveal too: collapse and expand can
+    // land in one coalesced pass, so the DOM may never show the closed face.
+    button.click()
+    env.flushTimers()
+    assert.equal(rows.d1.style.display, undefined, 'the press reopened the history')
+    header.click()
+    env.flushTimers()
+    assert.equal(rows.d1.style.display, 'none', 'the header click brought the fold back')
+  } finally {
+    tearDown()
+  }
+})
+
 test('a host overflow-button click pierces the freeze even while the pointer is inside the tree', async () => {
   // Reported live: with the pointer parked over the sidebar, the truncation
   // control swallowed its own click — the pointer is inevitably inside the
