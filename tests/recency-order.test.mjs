@@ -711,6 +711,82 @@ test('a row whose visible text betrays the pairing makes the section no-op', asy
   }
 })
 
+test('an untitled session pairs by the host placeholder, so the row layer applies', async () => {
+  // Live bug (dsh-auto-dev workspace, 0.2.1-rc.1): the sessions service reports
+  // displayTitle as the workspace basename for a session with no durable title
+  // (service.ts:119-126 displayTitleOf), while the host row renders
+  // `title || t('session.untitled')` (tree.ts:295-297, Rows.tsx:49). Pairing on
+  // displayTitle alone failed on row 1 of 5, the whole section stepped aside,
+  // and the workspace kept the host's 32px rows with no green Active band.
+  const sessions = [
+    session('u1', 'dsh-auto-dev', 300, { title: undefined }),
+    session('u2', 'Older talk', 100),
+  ]
+  const workspaces = [{ workspaceId: 'w1', path: '/dsh-auto-dev', title: 'dsh-auto-dev', sessionIds: ['u1', 'u2'] }]
+  const { rows, tearDown } = await mount({
+    sections: [{
+      title: 'dsh-auto-dev',
+      rows: [
+        { id: 'u1', text: '未命名1分钟' },
+        { id: 'u2', text: 'Older talk1个月' },
+      ],
+    }],
+    sessions,
+    workspaces,
+  })
+  try {
+    assert.equal(rows.u1.style.order, '10', 'the untitled row is ranked, not bailed out')
+    assert.equal(rows.u2.style.order, '11')
+  } finally {
+    tearDown()
+  }
+})
+
+test('the English locale pairs the untitled placeholder too', async () => {
+  const sessions = [
+    session('u1', 'demo', 300, { title: undefined }),
+  ]
+  const workspaces = [{ workspaceId: 'w1', path: '/demo', title: 'demo', sessionIds: ['u1'] }]
+  const { rows, tearDown } = await mount({
+    sections: [{ title: 'demo', rows: [{ id: 'u1', text: 'Untitled1 minute' }] }],
+    sessions,
+    workspaces,
+    locale: 'en-US',
+  })
+  try {
+    assert.equal(rows.u1.style.order, '10')
+  } finally {
+    tearDown()
+  }
+})
+
+test('a titled session whose row shows the placeholder still fails closed', async () => {
+  // The placeholder fallback must not become a wildcard: a session the service
+  // can report a title for is confirmed by that title only.
+  const sessions = [
+    session('t1', 'Real title', 300, { title: 'Real title' }),
+    session('t2', 'Other title', 100),
+  ]
+  const workspaces = [{ workspaceId: 'w1', path: '/w1', title: 'w1', sessionIds: ['t1', 't2'] }]
+  const { rows, tearDown } = await mount({
+    sections: [{
+      title: 'w1',
+      rows: [
+        { id: 't1', text: '未命名1分钟' },
+        { id: 't2', text: 'Other title1个月' },
+      ],
+    }],
+    sessions,
+    workspaces,
+  })
+  try {
+    assert.equal(rows.t1.style.order, undefined, 'a title mismatch is still a mismatch')
+    assert.equal(rows.t2.style.order, undefined)
+  } finally {
+    tearDown()
+  }
+})
+
 /** A host-shaped row (Rows.tsx order): status leaf, title leaf, time leaf. */
 function hostDomRow(id, title, time, status) {
   return {

@@ -462,6 +462,21 @@ function isChinese(locale) {
 }
 
 /**
+ * The label the host renders in a row whose Session has no durable title
+ * (Rows.tsx:49 `node.title || t('session.untitled')`, locales.ts:
+ * `session.untitled`). This is the ONE row label the sessions service cannot
+ * report: `SessionSummary.displayTitle` falls back to the workspace basename
+ * (session-controller service.ts:119-126 `displayTitleOf`), while the tree node
+ * hands the row `sessionTitle(session)` — the durable title, empty when none
+ * exists (tree.ts:295-297). Pairing therefore has to know the placeholder.
+ * @param {string} locale - active locale id ('zh' prefix wins, else en).
+ * @returns the host's untitled placeholder for that locale.
+ */
+function untitledLabel(locale) {
+  return isChinese(locale) ? '未命名' : 'Untitled'
+}
+
+/**
  * The workspace header badge's tooltip for a set of hidden Active-zone counts
  * (spec §5): `2 待回复 · 1 未读` / `2 waiting · 1 unread`, zero parts omitted,
  * and an empty string when there is no hidden attention at all (the caller
@@ -832,8 +847,9 @@ function collapsedShown(expected, data, domCount) {
  * "presentation never guesses"): each paired row must confirm the pairing
  * from its own visible text. An ordinary row confirms when one of its LEAF
  * elements (an element with no element children, the row itself included)
- * carries normalized text starting with the session's normalized
- * displayTitle. The host renders the title in its own leaf span (Rows.tsx
+ * carries normalized text starting with the session's normalized row label
+ * (`title`, or the locale's untitled placeholder when the summary has none).
+ * The host renders the title in its own leaf span (Rows.tsx
  * title span, then the time leaf), so the status badge the host renders in
  * the row's preceding status slot (visually-hidden labels that still land in
  * textContent) no longer breaks the check: a status leaf carries status
@@ -844,14 +860,21 @@ function collapsedShown(expected, data, domCount) {
  * and matches what the host DOM reports for the row wrapper. A blank row
  * renders a localized label this feature cannot know, so it is pinned to its
  * position instead: the host's pinCurrentBlank invariant puts a visible blank
- * row at index 0. Failure boundaries: a row with neither its whole text nor
- * any leaf confirming the title, an empty or non-string displayTitle, or a
- * blank row anywhere but index 0, fails closed (the whole section's row
- * layer no-ops); the check is positional and prefix-anchored (no substring
- * match), so one title prefixing another row's text cannot cross-align.
+ * row at index 0. An UNTITLED row is the other label the service cannot
+ * report: `displayTitle` falls back to the workspace basename
+ * (session-controller service.ts:119-126) while the host renders
+ * `title || t('session.untitled')` (tree.ts:295-297, Rows.tsx:49), so a pair is
+ * confirmed by the durable `title` when the summary carries one and by that
+ * localized placeholder (or the historical displayTitle, which fixtures still
+ * use) when it does not. Failure boundaries: a row with neither its whole text
+ * nor any leaf confirming the expected label, a non-string title whose
+ * fallback is empty, or a blank row anywhere but index 0, fails closed (the
+ * whole section's row layer no-ops); the check is positional and
+ * prefix-anchored (no substring match), so one title prefixing another row's
+ * text cannot cross-align.
  */
-function pairingTrustworthy(rows, shown, byId) {
-  return firstUnpairedRow(rows, shown, byId) === -1
+function pairingTrustworthy(rows, shown, byId, locale) {
+  return firstUnpairedRow(rows, shown, byId, locale) === -1
 }
 
 /**
@@ -859,7 +882,7 @@ function pairingTrustworthy(rows, shown, byId) {
  * every pairing is confirmed. Same rule `pairingTrustworthy` documents; the
  * index exists so a bail-out can say where it broke instead of saying nothing.
  */
-function firstUnpairedRow(rows, shown, byId) {
+function firstUnpairedRow(rows, shown, byId, locale) {
   for (let i = 0; i < shown.length; i += 1) {
     const session = byId[shown[i]]
     if (session === undefined) return i
@@ -867,11 +890,23 @@ function firstUnpairedRow(rows, shown, byId) {
       if (i !== 0) return i
       continue
     }
-    const title = session.displayTitle
-    if (typeof title !== 'string' || title === '') return i
-    const target = normalizeText(title)
-    if (target === '') return i
-    if (!rowCarriesTitle(rows[i], target)) return i
+    const durable = typeof session.title === 'string' ? session.title.trim() : ''
+    if (durable !== '') {
+      const target = normalizeText(durable)
+      if (target === '' || !rowCarriesTitle(rows[i], target)) return i
+      continue
+    }
+    // No durable title: the host renders its placeholder, while older
+    // summaries (and the test fixtures) carry the label in displayTitle.
+    const candidates = [untitledLabel(locale)]
+    if (typeof session.displayTitle === 'string' && session.displayTitle !== '') {
+      candidates.push(session.displayTitle)
+    }
+    const confirmed = candidates.some((candidate) => {
+      const target = normalizeText(candidate)
+      return target !== '' && rowCarriesTitle(rows[i], target)
+    })
+    if (!confirmed) return i
   }
   return -1
 }
@@ -1782,14 +1817,18 @@ function orderRows(section, account, data, view) {
   const rows = rowChildren(section)
   const shown = sectionCollapsed(section) ? collapsedShown(expected, data, rows.length) : expected
   // A folded group renders no rows at all: there is nothing to order, and a
-  // count trace here would be noise (the group layer still runs).
+  // count trace here would be noise (the group layer still runs). The
+  // host's overflow button carries no aria-expanded in 0.2.1-rc.1, so
+  // `sectionCollapsed` cannot see that fold; an empty row set with no session
+  // row anywhere in the section is the same fact stated by the DOM.
+  if (rows.length === 0 && !hasSessionRow(section, 0)) return
   if (shown === null) return
   if (rows.length !== shown.length) {
     traceSkip(account.key, 'count', `dom ${rows.length} vs replay ${shown.length}`)
     absorbHostTruncation(section, account, data)
     return
   }
-  const unpaired = firstUnpairedRow(rows, shown, data.byId)
+  const unpaired = firstUnpairedRow(rows, shown, data.byId, data.locale)
   if (unpaired !== -1) {
     traceSkip(account.key, 'pairing', `row ${unpaired} of ${shown.length}`)
     absorbHostTruncation(section, account, data)

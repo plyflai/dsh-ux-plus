@@ -160,6 +160,7 @@ npm run build   # tsdown emits lib/client.js (classic script, committed to the r
 
 The five most recent entries; full history in [CHANGELOG.md](CHANGELOG.md).
 
+- **v0.5.23 · 2026-10-25** — A workspace holding an untitled session no longer falls back to the host's tall rows: its rows pair with the label the host actually renders, so the compact box, the pale-green Active block and the status dots come back.
 - **v0.5.22 · 2026-10-23** — Closing a workspace and opening it again comes back as the pale-green Active block only — history no longer tags along; a workspace with no Active row still opens like the host.
 - **v0.5.21 · 2026-10-21** — The box moves to just under 【New session】 (it used to sit above 【Automation tasks】, on top of the workspace list); the hint is now "Just ask, no new session" and the feature is called "Quick ask".
 - **v0.5.20 · 2026-10-21** — the quick-search docs now show the state dots: a green corner dot on the bubble for an unread answer, amber for a pending reply, and on every history row.

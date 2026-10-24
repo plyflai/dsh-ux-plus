@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.5.23 — 2026-10-25
+
+- 行为：工作区里只要有一个「未命名」会话，这个工作区的整段行层就不再退回宿主的大行（32px、无绿底、无状态点）。用户报告的是 `dsh-auto-dev` 工作区：正在跑的会话没有绿底、每个会话行也偏高。
+- 根因：行层在写顺序前要确认「第 i 个 DOM 行 == 第 i 个 session」，用的是 `session.displayTitle` 前缀校验；而无标题会话在服务层拿的是工作区名兜底（session-controller `service.ts` 的 `displayTitleOf`），宿主行渲染的却是本地化占位「未命名」/「Untitled」。前缀永远对不上 → fail-closed → 整段行层 no-op。
+- 实现：`firstUnpairedRow()`/`pairingTrustworthy()` 改为按宿主真实行标签确认：有 `title` 时用它（durable），没有时用当前 locale 的未命名占位（历史 fixture 里的 displayTitle 仍兼容）。有 `title` 的会话只认 `title`，所以占位符号不会变成万能匹配——真正的错配照样 fail-closed。同时 `orderRows()` 增加了「行集合为空且子树里没有任何 session 行」的静默返回（宿主 0.2.1-rc.1 的溢出按钮没有 `aria-expanded`，折叠态无法从按钮读出，空行集合就是同一事实）。
+- 测试：`tests/recency-order.test.mjs` 新增三条——中文占位配对成功、英文 `Untitled` 配对成功、有 `title` 的会话渲染占位时仍然 fail-closed。无修复时前两条变红（已实测：141 pass / 2 fail），修复后 143/143。
+- 验证：把新构建投到运行中的 live 快照（profile `web-bili-test` → `releases/candidates/ux-plus-0.4.0-live-20261017/components/dsh-ux-plus`），真机 headless 探针确认 `dsh-auto-dev` 的会话行 `height: 26px`、`data-dsh-ux-zone="active"`、组内 `data-dsh-ux-plus="zone-band"` 为 `rgba(34,197,94,.07)`、运行中行有 `session-status-dot`（蓝环），dormant 行折叠隐藏。
+
 ## 0.5.22 — 2026-10-23
 
 - 行为：收起再展开工作区，回到折叠态——只展开绿底的 Active 区，历史不再跟着一起回来（用户报告：混合展开）。一次【展开其余 N 个会话】会把整段会话在整页生命周期内保持展开，所以之后重新打开工作区时回放的是那次展开；现在工作区被收起、或点了标题行，都会清掉展开态。
