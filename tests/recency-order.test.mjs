@@ -715,7 +715,7 @@ test('an untitled session pairs by the host placeholder, so the row layer applie
   // Live bug (dsh-auto-dev workspace, 0.2.1-rc.1): the sessions service reports
   // displayTitle as the workspace basename for a session with no durable title
   // (service.ts:119-126 displayTitleOf), while the host row renders
-  // `title || t('session.untitled')` (tree.ts:295-297, Rows.tsx:49). Pairing on
+  // `title || t('session.untitled')` (ui-workspace rows/Rows.tsx:47-50 displayTitle). Pairing on
   // displayTitle alone failed on row 1 of 5, the whole section stepped aside,
   // and the workspace kept the host's 32px rows with no green Active band.
   const sessions = [

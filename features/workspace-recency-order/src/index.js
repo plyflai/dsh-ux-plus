@@ -468,7 +468,7 @@ function isChinese(locale) {
  * report: `SessionSummary.displayTitle` falls back to the workspace basename
  * (session-controller service.ts:119-126 `displayTitleOf`), while the tree node
  * hands the row `sessionTitle(session)` — the durable title, empty when none
- * exists (tree.ts:295-297). Pairing therefore has to know the placeholder.
+ * exists (ui-workspace rows/Rows.tsx:47-50). Pairing therefore has to know the placeholder.
  * @param {string} locale - active locale id ('zh' prefix wins, else en).
  * @returns the host's untitled placeholder for that locale.
  */
@@ -863,7 +863,7 @@ function collapsedShown(expected, data, domCount) {
  * row at index 0. An UNTITLED row is the other label the service cannot
  * report: `displayTitle` falls back to the workspace basename
  * (session-controller service.ts:119-126) while the host renders
- * `title || t('session.untitled')` (tree.ts:295-297, Rows.tsx:49), so a pair is
+ * `title || t('session.untitled')` (ui-workspace rows/Rows.tsx:47-50 displayTitle), so a pair is
  * confirmed by the durable `title` when the summary carries one and by that
  * localized placeholder (or the historical displayTitle, which fixtures still
  * use) when it does not. Failure boundaries: a row with neither its whole text
