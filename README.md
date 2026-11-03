@@ -16,7 +16,7 @@ You just want to look something up, and the price used to be: create a workspace
 
 - **three clicks saved**: no new workspace, no name to invent, no directory to pick — just start asking or searching
 - magnifier on the left, a tiny model picker on the right (host default model unless you pick one)
-- the clock icon on the right is history: your last 50 searches, one click back to that session
+- hover the session bubble on the right for history (your last 50 searches, one click back); a click reopens the newest search session
 - the hidden workspace is `.dsh-ux-plus/search` under your home directory, created on first use and never shown in the sidebar
 
 ![The box sitting under New session](docs/images/quick-search.png)
@@ -53,14 +53,13 @@ Each row lists only what you can see and do in the interface.
 
 A box sits permanently under **New session** in the sidebar and drops both "create a workspace first" and "start a new session" steps: ask or search right away — type, press Enter, and an ordinary session opens (same UI as any other session) while filing itself into a hidden workspace, out of your sidebar.
 
-![The box sits under **New session**: magnifier on the left, model, history and session-bubble icons on the right, one faint italic hint when empty](docs/images/quick-search.png)
+![The box sits under **New session**: magnifier on the left, the model chip and the session bubble on the right, one faint italic hint when empty](docs/images/quick-search.png)
 
 | Element | Behaviour |
 | --- | --- |
 | Input (magnifier on the left) | Enter searches straight away (the field is single-line); an Enter that ends an IME composition never submits by accident |
 | Model picker | A small chip icon on the right: click it for the model list (the current pick is ticked). Leave it alone to use the host default; a non-default pick puts a dot on the chip and is remembered locally |
-| Session bubble (far right) | One click returns to the newest search session, finished or not. While a search is running a dot lights inside the bubble and breathes — never a number. A small corner dot carries the state: **green** = the answer arrived and is unread, **amber** = a turn is waiting for your reply. Dim and inert while there is no search session yet |
-| Clock icon (right) | Opens history: the last 50 searches, one click reopens that session, one button clears the list. Each row carries the same dot — green for an unread answer, amber for a pending question |
+| Session bubble (far right) | Two intents, one control. **Hover** it for history: the last 50 searches, one click reopens that session, one button clears the list; each row carries the same dot — green for an unread answer, amber for a pending question. **Click** it to return to the newest search session, finished or not. While a search is running a dot lights inside the bubble and breathes — never a number. A small corner dot carries the state: **green** = the answer arrived and is unread, **amber** = a turn is waiting for your reply. Dim while there is no search session yet — hovering it still shows the (empty) history |
 | Sidebar | Search sessions **never show up** — they all live in the hidden workspace |
 
 ![Top-right of the bubble: green when an answer landed unread, amber when it is waiting for you; the history rows carry the same dots](docs/images/quick-search-badges.png)
@@ -71,9 +70,9 @@ A box sits permanently under **New session** in the sidebar and drops both "crea
 
 Type a question in that box, the icons on the right stay put, Enter opens an ordinary session:
 
-![A question typed into the box, the three icons unchanged](docs/images/quick-search-typed.png)
+![A question typed into the box, the icons unchanged](docs/images/quick-search-typed.png)
 
-While a search is running, a dot lights up inside the right-hand bubble; a click returns to the newest search session — finished or not.
+While a search is running, a dot lights up inside the right-hand bubble. Hover the bubble for the history panel; a click returns to the newest search session — finished or not.
 
 ### Attention favicon
 
@@ -160,6 +159,7 @@ npm run build   # tsdown emits lib/client.js (classic script, committed to the r
 
 The five most recent entries; full history in [CHANGELOG.md](CHANGELOG.md).
 
+- **v0.5.24 · 2026-11-03** — The search box loses its clock icon: hovering the session bubble at its right end opens the history panel, and a click still reopens the newest search session.
 - **v0.5.23 · 2026-10-25** — A workspace holding an untitled session no longer falls back to the host's tall rows: its rows pair with the label the host actually renders, so the compact box, the pale-green Active block and the status dots come back.
 - **v0.5.22 · 2026-10-23** — Closing a workspace and opening it again comes back as the pale-green Active block only — history no longer tags along; a workspace with no Active row still opens like the host.
 - **v0.5.21 · 2026-10-21** — The box moves to just under 【New session】 (it used to sit above 【Automation tasks】, on top of the workspace list); the hint is now "Just ask, no new session" and the feature is called "Quick ask".

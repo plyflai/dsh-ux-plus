@@ -457,8 +457,8 @@ test('mount seats the box directly under the New Session button and dispose remo
     const fieldCss = rule('[data-qs="field"] {')
     assert.ok(/padding: 0 6px/.test(fieldCss), 'the field insets both ends by the same amount')
     const slotWidth = (sel) => (/width: (\d+)px/.exec(rule(sel)) || [])[1]
-    assert.equal(slotWidth('[data-qs="glass"]'), slotWidth('[data-qs="history"]'), 'left icon and right icon share one slot width')
-    assert.equal(slotWidth('[data-qs="glass"]'), slotWidth('[data-qs="model"]'), 'left slot matches the model slot too')
+    assert.equal(slotWidth('[data-qs="glass"]'), slotWidth('[data-qs="model"]'), 'left slot matches the model slot')
+    assert.equal(pick(rootNode, 'data-qs', 'history'), null, 'the field no longer carries a history icon')
     // The running ring sits OUTSIDE the field, in the blank the field gives up.
     assert.equal(slotWidth('[data-qs="runs"]'), '20', 'the ring gets its own smaller column')
     const rowCss = rule('[data-qs="row"] {')
@@ -470,7 +470,10 @@ test('mount seats the box directly under the New Session button and dispose remo
     assert.equal(runs.getAttribute('data-state'), 'idle', 'nothing is running at mount')
     assert.equal(runs.getAttribute('aria-disabled'), 'true')
     assert.equal(runs.textContent, '', 'the bubble carries no count')
-    assert.equal(runs.getAttribute('title'), '还没有搜索会话')
+    assert.equal(runs.getAttribute('aria-haspopup'), 'dialog', 'the bubble never lies about what it opens on hover')
+    assert.equal(runs.getAttribute('aria-expanded'), 'false', 'nothing is open at mount')
+    assert.equal(runs.getAttribute('title'), null, 'no browser tooltip over the panel the hover opens')
+    assert.equal(runs.getAttribute('aria-label'), '搜索历史', 'the accessible name names the hover action')
     // One glyph, two states: the bubble outline is always there, the dot is a
     // filled path CSS switches off while nothing runs.
     const icon = runs.children[0]
@@ -547,7 +550,7 @@ test('the bubble lights up while a search runs and always opens the newest one',
     env.flushTimers()
     assert.equal(runs.getAttribute('data-state'), 'active')
     assert.equal(runs.textContent, '', 'the glyph never grows a number')
-    assert.equal(runs.getAttribute('title'), '打开最近的搜索会话：清理 Docker 缓存（正在运行）')
+    assert.equal(runs.getAttribute('aria-label'), '搜索历史 · 打开最近的搜索会话：清理 Docker 缓存（正在运行）')
 
     // The jump is not gated on a live turn: it always lands on the newest search session.
     runs.dispatch('click', {})
@@ -572,7 +575,7 @@ test('the bubble lights up while a search runs and always opens the newest one',
     assert.equal(runs.getAttribute('data-state'), 'idle')
     assert.equal(runs.textContent, '')
     assert.equal(runs.getAttribute('aria-disabled'), 'false', 'there is still something to open')
-    assert.equal(runs.getAttribute('title'), '打开最近的搜索会话：关于项目结构的讨论')
+    assert.equal(runs.getAttribute('aria-label'), '搜索历史 · 打开最近的搜索会话：关于项目结构的讨论')
     runs.dispatch('click', {})
     assert.deepEqual(calls.opened, ['s-a', 's-a', 's-b'], 'idle means nothing runs, not nothing to open')
 
@@ -581,7 +584,7 @@ test('the bubble lights up while a search runs and always opens the newest one',
     setSessions([])
     env.flushTimers()
     assert.equal(runs.getAttribute('aria-disabled'), 'true')
-    assert.equal(runs.getAttribute('title'), '还没有搜索会话')
+    assert.equal(runs.getAttribute('aria-label'), '搜索历史')
     runs.dispatch('click', {})
     assert.deepEqual(calls.opened, ['s-a', 's-a', 's-b'], 'nothing to open, nothing happens')
   } finally {
@@ -857,13 +860,13 @@ test('a corner dot marks what is waiting for me, on the bubble and in the histor
     setStatus('s-a', { running: false, completionUnread: true })
     env.flushTimers()
     assert.equal(badge.getAttribute('data-state'), 'unread', 'an unread answer marks the newest search session')
-    assert.equal(runs.getAttribute('title'), '打开最近的搜索会话：清理 Docker 缓存 · 已完成')
+    assert.equal(runs.getAttribute('aria-label'), '搜索历史 · 打开最近的搜索会话：清理 Docker 缓存 · 已完成')
 
     // A question trumps the unread mark: amber.
     setStatus('s-a', { running: false, completionUnread: true, pendingInteraction: { id: 'q-1' } })
     env.flushTimers()
     assert.equal(badge.getAttribute('data-state'), 'waiting', 'waiting for an answer outranks unread')
-    assert.equal(runs.getAttribute('title'), '打开最近的搜索会话：清理 Docker 缓存 · 待你回复')
+    assert.equal(runs.getAttribute('aria-label'), '搜索历史 · 打开最近的搜索会话：清理 Docker 缓存 · 待你回复')
 
     // Still running: the bubble's own dot says it, the corner stays empty.
     setStatus('s-a', { running: true })
@@ -875,7 +878,9 @@ test('a corner dot marks what is waiting for me, on the bubble and in the histor
     setStatus('s-a', { running: false, pendingInteraction: { id: 'q-1' } })
     setStatus('s-b', { running: false, completionUnread: true })
     env.flushTimers()
-    pick(rootNode, 'data-qs', 'history').dispatch('click', {})
+    runs.dispatch('pointerenter', {})
+    env.flushTimers()
+    assert.equal(runs.getAttribute('aria-expanded'), 'true', 'hovering the bubble opens the history')
     const popup = env.document.body.children.find((el) => el.getAttribute('data-dsh-ux-plus') === 'quick-search-history')
     const rows = collect(popup, (el) => el.getAttribute('data-qs') === 'menu-row')
     assert.equal(rows.length, 2)
@@ -885,16 +890,19 @@ test('a corner dot marks what is waiting for me, on the bubble and in the histor
     assert.equal(second.getAttribute('data-state'), 'unread', 'the other finished unseen')
     assert.equal(rows[0].getAttribute('data-qs-attention'), 'waiting')
     assert.equal(rows[1].getAttribute('data-qs-attention'), 'unread')
-    // Reading it clears the mark the next time the popup opens.
-    pick(rootNode, 'data-qs', 'history').dispatch('click', {})
+    // Moving away closes it; the next hover renders the marks afresh.
+    runs.dispatch('pointerleave', {})
+    env.flushTimers()
     assert.equal(
       env.document.body.children.some((el) => el.getAttribute('data-dsh-ux-plus') === 'quick-search-history'),
       false,
-      'a second click on the icon closes the popup',
+      'leaving the bubble closes the popup after the grace period',
     )
+    assert.equal(runs.getAttribute('aria-expanded'), 'false')
     setStatus('s-b', { running: false, completionUnread: false })
     env.flushTimers()
-    pick(rootNode, 'data-qs', 'history').dispatch('click', {})
+    runs.dispatch('pointerenter', {})
+    env.flushTimers()
     const reopened = env.document.body.children.find((el) => el.getAttribute('data-dsh-ux-plus') === 'quick-search-history')
     const plain = collect(reopened, (el) => el.getAttribute('data-qs') === 'menu-row')[1]
     assert.equal(pick(plain, 'data-qs', 'row-badge').getAttribute('data-state'), 'none')
@@ -950,7 +958,7 @@ test('a navigation that cannot happen is reported in the box, never swallowed', 
   }
 })
 
-test('the history icon lists the last searches and reopens one', async () => {
+test('hovering the bubble lists the last searches and a row reopens one', async () => {
   const env = makeEnv()
   installGlobals(env)
   try {
@@ -967,8 +975,16 @@ test('the history icon lists the last searches and reopens one', async () => {
     await settle()
     assert.deepEqual(calls.opened, ['session-1', 'session-1'])
 
-    const history = pick(rootNode, 'data-qs', 'history')
-    history.dispatch('click', {})
+    // One control, two intents: a click opens the newest search, so the history
+    // panel is the hover answer. A click no longer toggles it.
+    const runs = pick(rootNode, 'data-qs', 'runs')
+    runs.dispatch('pointerenter', {})
+    assert.equal(
+      env.document.body.children.some((el) => el.getAttribute('data-dsh-ux-plus') === 'quick-search-history'),
+      false,
+      'a swept-over bubble does not flash the panel',
+    )
+    env.flushTimers()
     const popup = env.document.body.children.find((el) => el.getAttribute('data-dsh-ux-plus') === 'quick-search-history')
     assert.ok(popup, 'the popup is a body child (the sidebar clips it)')
     const rows = collect(popup, (el) => el.getAttribute('data-qs') === 'menu-row')
@@ -982,12 +998,14 @@ test('the history icon lists the last searches and reopens one', async () => {
     assert.equal(env.docListeners.pointerdown.length, 0, 'closing removes the document listeners')
 
     // Reopen and clear.
-    history.dispatch('click', {})
+    runs.dispatch('pointerenter', {})
+    env.flushTimers()
     const again = env.document.body.children.find((el) => el.getAttribute('data-dsh-ux-plus') === 'quick-search-history')
     const clear = pick(again, 'data-qs', 'menu-clear')
     clear.dispatch('click', {})
     assert.equal(JSON.parse(env.window.localStorage.getItem('dsh.ux-plus.quick-search.history')).length, 0)
-    history.dispatch('click', {})
+    runs.dispatch('pointerenter', {})
+    env.flushTimers()
     const empty = env.document.body.children.find((el) => el.getAttribute('data-dsh-ux-plus') === 'quick-search-history')
     assert.equal(collect(empty, (el) => el.getAttribute('data-qs') === 'menu-row').length, 0)
     assert.ok(pick(empty, 'data-qs', 'menu-empty'), 'the empty state renders')

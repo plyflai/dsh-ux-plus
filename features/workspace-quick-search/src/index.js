@@ -26,6 +26,10 @@
  *   - Session creation reuses the path the inherit-conversation feature already
  *     proved end to end: `sessions.create` -> `remote.session.selectModel` ->
  *     `remote.session.prompt` -> `uiWorkspace.openSession`.
+ *   - The bubble at the far right carries two intents on one control: hover
+ *     reveals the search history, a click opens the newest search session. The
+ *     field therefore holds only the input and the model picker, and the
+ *     history no longer costs it a third icon.
  *   - "Not shown in DSH" cannot be done by archiving (an archived Session is
  *     barred from `agent/pre-step`, `archived-session-gate.ts:24-30`, so it
  *     could never run again) and the host has no filter that hides one
@@ -49,18 +53,18 @@ export const id = 'workspace-quick-search'
 /** Settings-row title (English constant; the settings tab localizes it). */
 export const title = 'Quick ask'
 /** Settings-row description fallback. */
-export const description = 'Ask the model without setting up a session: type a question under the New Session button, press Enter, and a normal session opens by itself in a background workspace the sidebar never lists. The clock icon lists the last 50 asks.'
+export const description = 'Ask the model without setting up a session: type a question under the New Session button, press Enter, and a normal session opens by itself in a background workspace the sidebar never lists. Hover the chat bubble for the last 50 asks; click it to reopen the newest one.'
 /** No gear: the box has no per-feature options beyond the switch itself. */
 export const hasGear = false
 /** Settings-row copy, assembled into the `ux-plus-settings` namespace. */
 export const settingsMessages = {
   zh: {
     title: '直接问',
-    description: '在【新建会话】下方常驻一个输入框：有临时搜索或小疑问，输入后回车即开一个普通会话，会话落在后台独立工作区里、不显示在侧边栏；右侧时钟图标列出最近 50 条提问。',
+    description: '在【新建会话】下方常驻一个输入框：有临时搜索或小疑问，输入后回车即开一个普通会话，会话落在后台独立工作区里、不显示在侧边栏；悬停右侧对话气泡看最近 50 条提问，点击回到最新那条会话。',
   },
   en: {
     title: 'Quick ask',
-    description: 'Ask the model without setting up a session: type a question under the New Session button, press Enter, and a normal session opens by itself in a background workspace the sidebar never lists. The clock icon lists the last 50 asks.',
+    description: 'Ask the model without setting up a session: type a question under the New Session button, press Enter, and a normal session opens by itself in a background workspace the sidebar never lists. Hover the chat bubble for the last 50 asks; click it to reopen the newest one.',
   },
 }
 
@@ -412,11 +416,9 @@ function svgIcon(doc, paths, size) {
 
 /** Magnifier (left, inside the field — the host's own filter box puts it outside). */
 const MAGNIFIER_PATHS = ['M7 2.6a4.4 4.4 0 1 0 0 8.8 4.4 4.4 0 0 0 0-8.8', 'M10.3 10.3 14 14']
-/** Clock with a backward arrow: the history entry point. */
-const CLOCK_PATHS = ['M8 2.4a5.6 5.6 0 1 0 0 11.2A5.6 5.6 0 0 0 8 2.4', 'M8 5.1v3.1l2.1 1.3']
 /**
  * Chip outline with pins: the model picker. Icon only — the picker is as small
- * as the other two controls, and the current model is in its tooltip and menu.
+ * as the magnifier, and the current model is in its tooltip and menu.
  */
 const MODEL_PATHS = [
   'M5.2 5.2h5.6v5.6H5.2z',
@@ -477,11 +479,6 @@ function boxCss() {
     // A picked non-default model keeps a dot on the chip: the picker carries no text.
     `${scope} [data-qs="model"][data-qs-picked="true"]::after { content: ""; position: absolute; right: 2px; bottom: 2px;`
       + ' width: 4px; height: 4px; border-radius: 50%; background: var(--dsw-alias-label-primary, #e8e8e8); }',
-    `${scope} [data-qs="history"] { flex: 0 0 auto; display: inline-flex; align-items: center; justify-content: center;`
-      + ' width: 22px; height: 22px; padding: 0; line-height: 0; border: none; border-radius: 6px; background: transparent;'
-      + ' color: var(--dsw-alias-label-secondary, #9aa0ab); cursor: pointer; }',
-    `${scope} [data-qs="history"]:hover { color: var(--dsw-alias-label-primary, #e8e8e8);`
-      + ' background: var(--dsw-alias-interactive-bg-hover, rgba(128, 128, 128, 0.12)); }',
     // Back to my last search: a 20px hit area holding a 14px chat bubble. Idle is
     // the quiet outline with the dot switched off; running is the same bubble with
     // the dot lit, so the glyph never changes shape under the pointer.
@@ -497,6 +494,11 @@ function boxCss() {
     `@media (prefers-reduced-motion: reduce) { ${scope} [data-qs="runs"][data-state="active"] [data-qs="run-dot"] { animation: none; } }`,
     `${scope} [data-qs="runs"][aria-disabled="true"] { cursor: default; }`,
     `${scope} [data-qs="runs"][aria-disabled="true"]:hover { background: transparent; }`,
+    // While the history panel is open the bubble stays lit, so the panel reads as
+    // attached to this control rather than as a floating window.
+    `${scope} [data-qs="runs"][aria-expanded="true"]:not([aria-disabled="true"]) {`
+      + ' color: var(--dsw-alias-label-primary, #e8e8e8);'
+      + ' background: var(--dsw-alias-interactive-bg-hover, rgba(128, 128, 128, 0.12)); }',
     // The corner dot: amber = waiting for an answer, green = finished and unread.
     // Hidden by default so the icon never shifts; the sidebar fill outlines it so
     // it reads as a badge on top of the glyph rather than a second dot beside it.
@@ -699,7 +701,7 @@ export function client(ctx, deps) {
   // Placement: one stable node, re-inserted whenever React or the user moves it.
   // -------------------------------------------------------------------------
 
-  const refs = { root: null, input: null, model: null, history: null, runs: null, badge: null, status: null }
+  const refs = { root: null, input: null, model: null, runs: null, badge: null, status: null }
 
   /** The text field placeholder / labels follow the active locale. */
   function applyCopy() {
@@ -708,10 +710,6 @@ export function client(ctx, deps) {
       refs.input.setAttribute('aria-label', t('placeholder'))
     }
     if (refs.model !== null) refs.model.setAttribute('aria-label', modelTitle())
-    if (refs.history !== null) {
-      refs.history.setAttribute('aria-label', t('history'))
-      refs.history.setAttribute('title', t('history'))
-    }
     refreshRing()
   }
 
@@ -738,10 +736,17 @@ export function client(ctx, deps) {
     input.value = ''
     const model = el('button', { 'data-qs': 'model', type: 'button', 'data-qs-picked': 'false' })
     model.appendChild(svgIcon(document, MODEL_PATHS, 14))
-    const history = el('button', { 'data-qs': 'history', type: 'button' })
-    history.appendChild(svgIcon(document, CLOCK_PATHS, 14))
-    // Outside the field, in the blank the field gives up on its right.
-    const runs = el('button', { 'data-qs': 'runs', type: 'button', 'data-state': 'idle', 'aria-disabled': 'true' })
+    // Outside the field, in the blank the field gives up on its right. One
+    // control, two intents: hover opens the history panel, click reopens the
+    // newest search session.
+    const runs = el('button', {
+      'data-qs': 'runs',
+      type: 'button',
+      'data-state': 'idle',
+      'aria-disabled': 'true',
+      'aria-haspopup': 'dialog',
+      'aria-expanded': 'false',
+    })
     runs.appendChild(svgIcon(document, [...BUBBLE_PATHS, BUBBLE_DOT], 14))
     // The corner dot: amber while a turn waits on the user, green on an unread
     // answer. Present-but-hidden keeps the geometry identical in every state.
@@ -751,7 +756,6 @@ export function client(ctx, deps) {
     field.appendChild(glass)
     field.appendChild(input)
     field.appendChild(model)
-    field.appendChild(history)
     row.appendChild(field)
     row.appendChild(runs)
     root.appendChild(row)
@@ -759,13 +763,14 @@ export function client(ctx, deps) {
 
     input.addEventListener('keydown', onKeyDown)
     model.addEventListener('click', openModelMenu)
-    history.addEventListener('click', openHistory)
+    runs.addEventListener('pointerenter', onRunsEnter)
+    runs.addEventListener('pointerleave', onRunsLeave)
+    runs.addEventListener('keydown', onRunsKeyDown)
     runs.addEventListener('click', onRunsClick)
 
     refs.root = root
     refs.input = input
     refs.model = model
-    refs.history = history
     refs.runs = runs
     refs.badge = badge
     refs.status = status
@@ -1033,8 +1038,43 @@ export function client(ctx, deps) {
   let popupAnchor = null
   let popupKind = null
 
+  /**
+   * Hover intent for the history panel. The open delay keeps a pointer that is
+   * only sweeping across the bubble from flashing a panel; the longer close
+   * grace is the time the pointer needs to cross the 6px gap into the panel.
+   */
+  const HOVER_OPEN_DELAY = 110
+  const HOVER_CLOSE_DELAY = 240
+  let hoverTimer = null
+
+  /** Drop a pending hover decision (open or close). */
+  function cancelHoverTimer() {
+    if (hoverTimer === null) return
+    window.clearTimeout(hoverTimer)
+    hoverTimer = null
+  }
+
+  /** One hover decision, replacing whatever was pending. */
+  function laterByHover(action, delay) {
+    cancelHoverTimer()
+    hoverTimer = window.setTimeout(() => {
+      hoverTimer = null
+      action()
+    }, delay)
+  }
+
+  /** Reflect the panel state on the bubble (assistive tech, and the lit style). */
+  function setExpanded(open) {
+    const button = refs.runs
+    if (button === null) return
+    const value = open ? 'true' : 'false'
+    if (button.getAttribute('aria-expanded') !== value) button.setAttribute('aria-expanded', value)
+  }
+
   /** Close whichever panel is open (search history or the model menu). */
   function closePanel() {
+    cancelHoverTimer()
+    setExpanded(false)
     if (popupCleanup !== null) {
       popupCleanup()
       popupCleanup = null
@@ -1045,7 +1085,7 @@ export function client(ctx, deps) {
     popupKind = null
   }
 
-  /** Anchor the fixed popup under the clock icon, clamped to the viewport. */
+  /** Anchor the fixed popup under the chat bubble, clamped to the viewport. */
   function positionPopup(node, anchor) {
     const viewportWidth = window.innerWidth || 1200
     const width = 300
@@ -1060,12 +1100,9 @@ export function client(ctx, deps) {
     node.style.top = `${Math.max(8, top)}px`
   }
 
-  /** Open (or refresh) the history popup. */
+  /** Open the history popup (hover or keyboard; already open is a no-op). */
   function openHistory() {
-    if (popup !== null && popupKind === 'history') {
-      closePanel()
-      return
-    }
+    if (popup !== null && popupKind === 'history') return
     pruneHistory()
     const node = el('div', { 'data-dsh-ux-plus': MENU_VALUE, 'data-ux-plus-instance': INSTANCE_TOKEN, role: 'dialog', 'aria-label': t('historyTitle') })
     const head = el('div', { 'data-qs': 'menu-head' })
@@ -1113,7 +1150,7 @@ export function client(ctx, deps) {
         node.appendChild(row)
       }
     }
-    openPanel(node, refs.history, 'history')
+    openPanel(node, refs.runs, 'history')
   }
 
   /** The model menu: one row per catalog model, the current pick ticked. */
@@ -1261,18 +1298,21 @@ export function client(ctx, deps) {
     if (refs.badge !== null && refs.badge.getAttribute('data-state') !== badge) {
       refs.badge.setAttribute('data-state', badge)
     }
-    let label = t('ringEmpty')
+    // The bubble is now two things at once: hovering it lists the history, and
+    // clicking it reopens the newest session. Hovering must not raise a browser
+    // tooltip on top of the panel it just opened, so the tooltip is gone and the
+    // accessible name leads with the history action.
+    let label = t('history')
     if (read.latest !== null) {
-      label = read.running === 0
+      const action = read.running === 0
         ? t('ringOpen', { title: read.latest.title })
         : t('ringOpenLive', { title: read.latest.title })
+      label = `${t('history')} · ${action}`
       if (badge === 'waiting') label = `${label} · ${t('badgeWaiting')}`
       else if (badge === 'unread') label = `${label} · ${t('badgeUnread')}`
     }
-    if (button.getAttribute('title') !== label) {
-      button.setAttribute('title', label)
-      button.setAttribute('aria-label', label)
-    }
+    if (button.getAttribute('title') !== null) button.removeAttribute('title')
+    if (button.getAttribute('aria-label') !== label) button.setAttribute('aria-label', label)
   }
 
   /**
@@ -1319,8 +1359,49 @@ export function client(ctx, deps) {
     return true
   }
 
+  /**
+   * Hover intent on the bubble. The open delay is what separates a pointer merely
+   * sweeping across the bubble from a deliberate ask for the history; a pending
+   * close is dropped the moment the pointer comes back.
+   */
+  function onRunsEnter() {
+    if (popupKind === 'history') {
+      cancelHoverTimer()
+      return
+    }
+    // Another panel already owns the pointer: a hover must not swap it out.
+    if (popupKind !== null) return
+    laterByHover(openHistory, HOVER_OPEN_DELAY)
+  }
+
+  /**
+   * Leaving the bubble starts the close grace instead of closing: the pointer
+   * still has to cross the gap into the panel, and entering it cancels the close.
+   */
+  function onRunsLeave() {
+    if (popupKind === 'history') laterByHover(closePanel, HOVER_CLOSE_DELAY)
+    else cancelHoverTimer()
+  }
+
+  /** Keyboard route to history: ArrowDown opens the panel on its first row. */
+  function onRunsKeyDown(event) {
+    if (!event || event.key !== 'ArrowDown') return
+    if (typeof event.preventDefault === 'function') event.preventDefault()
+    cancelHoverTimer()
+    openHistory()
+    if (popup === null || typeof popup.querySelector !== 'function') return
+    let row = null
+    try {
+      row = popup.querySelector('[data-qs="menu-row"]')
+    } catch {
+      row = null
+    }
+    if (row !== null && row !== undefined && typeof row.focus === 'function') row.focus()
+  }
+
   /** One click opens the newest search session — running or long finished. */
   function onRunsClick() {
+    cancelHoverTimer()
     const latest = state.latest
     if (latest === null) return
     openSessionById(latest.sessionId)
@@ -1341,6 +1422,7 @@ export function client(ctx, deps) {
     popupAnchor = anchor
     popupKind = kind
     positionPopup(node, anchor)
+    if (kind === 'history') setExpanded(true)
 
     const onDocumentPointer = (event) => {
       if (popup === null) return
@@ -1352,7 +1434,10 @@ export function client(ctx, deps) {
       closePanel()
     }
     const onKey = (event) => {
-      if (event && event.key === 'Escape') closePanel()
+      if (!event || event.key !== 'Escape') return
+      const hadFocus = kind === 'history' && popup !== null && focusInside(popup)
+      closePanel()
+      if (hadFocus && refs.runs !== null && typeof refs.runs.focus === 'function') refs.runs.focus()
     }
     const onResize = () => {
       if (popup !== null) positionPopup(popup, popupAnchor)
@@ -1368,9 +1453,32 @@ export function client(ctx, deps) {
       window.addEventListener('resize', onResize)
       offs.push(() => window.removeEventListener('resize', onResize))
     }
+    // The history panel is reached by hover, so it must survive the 6px gap
+    // between the bubble and itself: entering it cancels the pending close.
+    if (kind === 'history') {
+      const onEnter = () => cancelHoverTimer()
+      const onLeave = () => {
+        if (popupKind === 'history') laterByHover(closePanel, HOVER_CLOSE_DELAY)
+      }
+      if (typeof node.addEventListener === 'function') {
+        node.addEventListener('pointerenter', onEnter)
+        node.addEventListener('pointerleave', onLeave)
+        offs.push(() => {
+          node.removeEventListener('pointerenter', onEnter)
+          node.removeEventListener('pointerleave', onLeave)
+        })
+      }
+    }
     popupCleanup = () => {
       for (const off of offs) off()
     }
+  }
+
+  /** Whether keyboard focus currently sits inside `container`. */
+  function focusInside(container) {
+    const active = typeof document.activeElement === 'undefined' ? null : document.activeElement
+    if (active === null || active === undefined) return false
+    return typeof container.contains === 'function' && container.contains(active)
   }
 
   // -------------------------------------------------------------------------
@@ -1419,7 +1527,6 @@ export function client(ctx, deps) {
     refs.root = null
     refs.input = null
     refs.model = null
-    refs.history = null
     refs.runs = null
     refs.badge = null
     refs.status = null
