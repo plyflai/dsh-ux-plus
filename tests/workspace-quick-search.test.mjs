@@ -1016,6 +1016,54 @@ test('hovering the bubble lists the last searches and a row reopens one', async 
   }
 })
 
+test('a hover before the session list arrives never prunes the history', async () => {
+  const env = makeEnv()
+  installGlobals(env)
+  try {
+    const { ctx } = makeCtx()
+    const items = [{ workspaceId: 'ws-search', path: WORKSPACE_PATH, title: 'search', sessionIds: [] }]
+    const { deps, sessions } = makeDeps({ items })
+    const storageKey = 'dsh.ux-plus.quick-search.history'
+    const storedIds = () => JSON.parse(env.window.localStorage.getItem(storageKey) || '[]').map((entry) => entry.sessionId)
+    env.window.localStorage.setItem(storageKey, JSON.stringify([
+      { sessionId: 's-a', query: '清理 Docker 缓存', at: 2_000 },
+      { sessionId: 's-b', query: '关于项目结构的讨论', at: 1_000 },
+    ]))
+    // The client store starts out as `{ids: [], phase: 'pending'}` and only fills
+    // in after the first host pull, so an empty list here means "no answer yet".
+    sessions.set({ phase: 'pending', ids: [], byId: {} })
+    const { dispose, rootNode } = await mount(env, ctx, deps)
+    const runs = pick(rootNode, 'data-qs', 'runs')
+    /** Hover the bubble, read the rows it lists, then close again. */
+    const hoveredQueries = () => {
+      runs.dispatch('pointerenter', {})
+      env.flushTimers()
+      const popup = env.document.body.children.find((el) => el.getAttribute('data-dsh-ux-plus') === 'quick-search-history')
+      const queries = collect(popup, (el) => el.getAttribute('data-qs') === 'menu-row').map(
+        (row) => pick(row, 'data-qs', 'menu-query').textContent,
+      )
+      runs.dispatch('pointerleave', {})
+      env.flushTimers()
+      return queries
+    }
+
+    assert.deepEqual(hoveredQueries(), ['清理 Docker 缓存', '关于项目结构的讨论'], 'a pending list is not an empty list')
+    assert.deepEqual(storedIds(), ['s-a', 's-b'], 'nothing is persisted away while the list is pending')
+
+    // An answered-but-empty list is no better evidence: the rows stay.
+    sessions.set({ phase: 'ready', ids: [], byId: {} })
+    assert.deepEqual(hoveredQueries(), ['清理 Docker 缓存', '关于项目结构的讨论'], 'an empty host list leaves the history alone')
+
+    // Once the list answers, a session that is gone does leave the history.
+    sessions.set({ phase: 'ready', ids: ['s-a'], byId: { 's-a': { id: 's-a', running: false, displayTitle: '清理 Docker 缓存', updatedAt: 2_000 } } })
+    assert.deepEqual(hoveredQueries(), ['清理 Docker 缓存'], 'a session the host dropped still prunes')
+    assert.deepEqual(storedIds(), ['s-a'])
+    dispose()
+  } finally {
+    uninstallGlobals(env)
+  }
+})
+
 test('an IME composition Enter does not submit', async () => {
   const env = makeEnv()
   installGlobals(env)

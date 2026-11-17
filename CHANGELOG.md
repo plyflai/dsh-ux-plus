@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.5.25 — 2026-11-17
+
+- 行为：修「刷新页面后 hover 会话气泡，历史面板变空、本地历史被永久清空」。用户报告的是「search 右侧对话小 icon 悬停不再展示历史」；真机取证（Chrome 的 `Local Storage/leveldb` 日志）显示 23 条历史在一次写入里被写成 `[]`，而那 23 条对应的会话在磁盘上全都还在，随后只补回了清空之后新搜的两条。
+- 根因：`liveSessionIds()` 只要求 `sessions.list` 的 `ids` 是数组，就拿它当「哪些历史还活着」的判据。客户端的会话列表在首次拉取成功前就是 `{ids: [], byId: {}, phase: 'pending'}`（session-controller 的 `SessionListPhase`），所以刚刷新、WS 还没握上手的窗口里 hover 一次，`openHistory()` 第一步的 `pruneHistory()` 就把所有条目判死并 `persistHistory()` 落盘。修剪逻辑本身没坏（列表就绪时删掉真没了的会话是对的），坏在把「还没到」当成「已经没了」。
+- 实现：`liveSessionIds()` 在 `phase !== 'ready'` 时返回 null（列表未就绪就不表态，这一轮不修剪）；`pruneHistory()` 再加一道 `live.size === 0` 早退——空列表永远不足以认定所有会话都没了，等列表真正回来再剪。
+- 测试：新增「a hover before the session list arrives never prunes the history」——pending 空列表里 hover 后两条历史仍在、且没有落盘成 `[]`；`ready` 但仍为空列表时同样不动；列表回来且只含 `s-a` 时 `s-b` 才被剪掉并持久化。无修复时该用例红（实测 `AssertionError: a pending list is not an empty list`），修复后 `npm test` 144/144、`npm run build` 通过。
+- 验证：把新构建投到运行中的 live 快照，用把 WS upgrade 延迟 3s 的本地代理复现同一时序（hover 时列表还没到），确认历史保住，WS 连上后面板照常列出条目。
+- 恢复：被清掉的条目可从 Chrome 的 leveldb 日志里读回原名，清空之后的那次写入不会被覆盖，所以旧值仍在。恢复方式是在页面控制台执行一句 `localStorage.setItem`（条目内容见 issue/回复）。
+
 ## 0.5.24 — 2026-11-03
 
 - 行为：搜索框里的时钟图标去掉了。原来的历史下拉框挪到外侧的会话气泡上：**hover 气泡**才弹出历史（最近 50 条、点一行回到那个会话、一键清空），**点击气泡**仍然回到最新的搜索会话——一个控件两种意图，hover 不再顺带导航、点击不再顺带开历史。

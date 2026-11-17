@@ -1016,10 +1016,19 @@ export function client(ctx, deps) {
   // History popup (body child: the sidebar region clips overflowing content).
   // -------------------------------------------------------------------------
 
-  /** Session ids the host still knows, or null when the list is not ready. */
+  /**
+   * Session ids the host still knows, or null when the list cannot answer.
+   *
+   * The store starts as `{ids: [], phase: 'pending'}` and fills in after the
+   * first host pull, so an empty `ids` during `pending` means "no answer yet",
+   * not "no sessions". Pruning trusts this set to delete rows for good, so a
+   * list that has not arrived must not count as an empty one: hovering the
+   * bubble right after a reload once wiped the whole history this way.
+   */
   function liveSessionIds() {
     const snapshot = snapshotOf(deps && deps.sessions && deps.sessions.list)
     if (snapshot === null || !Array.isArray(snapshot.ids)) return null
+    if (typeof snapshot.phase === 'string' && snapshot.phase !== 'ready') return null
     return new Set(snapshot.ids)
   }
 
@@ -1027,6 +1036,10 @@ export function client(ctx, deps) {
   function pruneHistory() {
     const live = liveSessionIds()
     if (live === null) return
+    // An empty list never justifies wiping every row: the only way to tell a
+    // cleaned host from a list that has not been projected yet is to leave the
+    // history alone until at least one session answers for the workspace.
+    if (live.size === 0) return
     const next = state.history.filter((entry) => live.has(entry.sessionId))
     if (next.length === state.history.length) return
     state.history = next
