@@ -281,6 +281,80 @@ export function locateSearchSeat(doc) {
 }
 
 /**
+ * Lift the seat out of a host grid whose rows are all pinned.
+ *
+ * 0.2.2's `.scrollArea` is `grid-template-rows: 8px max-content 2px
+ * max-content` with the spacer pseudo-elements on rows 1/3 and the panel nav /
+ * workspace region on rows 2/4. A fifth child gets an IMPLICIT row after the
+ * workspace list, so the box would render under the sessions instead of under
+ * the New Session button. The enclosing `.scrollRegion` is a flex column, so
+ * seating the box directly above the scroll viewport restores the intended
+ * position without touching host rows.
+ * @param {{parent: object, anchor: object} | null} seat - the raw seat.
+ * @param {object | null | undefined} view - a Window (or a test double).
+ * @returns {{parent: object, anchor: object} | null} the adjusted seat.
+ */
+export function refineSearchSeat(seat, view) {
+  if (seat === null || seat === undefined) return null
+  if (view === null || view === undefined || typeof view.getComputedStyle !== 'function') return seat
+  const parentStyle = view.getComputedStyle(seat.parent)
+  if (String(parentStyle.display || '').indexOf('grid') === -1) return seat
+  const outer = seat.parent.parentNode
+  if (outer === null || outer === undefined) return seat
+  return { parent: outer, anchor: seat.parent }
+}
+
+/**
+ * Keep the box in the column the host gives the panel nav.
+ *
+ * 0.2.2's sidebar scroll area is `display: grid` with a narrow leading column
+ * (`4px 264px 6px`): auto-placement drops a fresh sibling into that 4px
+ * column, where the box collapses onto the panel nav and paints a few stray
+ * icon fragments at the sidebar's left edge. Copying the anchor's computed
+ * grid placement keeps the box in the nav's column without addressing any
+ * hashed class name (and falls back to no-op under a flex/block host).
+ * @param {object} root - the box's root element.
+ * @param {{parent: object, anchor: object}} seat - resolved insertion point.
+ */
+export function alignToSeat(root, seat) {
+  if (root === null || root === undefined || typeof root.style === 'undefined') return
+  const view = root.ownerDocument === null || root.ownerDocument === undefined ? null : root.ownerDocument.defaultView
+  if (view === null || view === undefined || typeof view.getComputedStyle !== 'function') return
+  const parentStyle = view.getComputedStyle(seat.parent)
+  const grid = String(parentStyle.display || '').indexOf('grid') !== -1
+  if (!grid) {
+    root.style.removeProperty('grid-column')
+    root.style.removeProperty('justify-self')
+    alignFlexBand(root, seat)
+    return
+  }
+  const anchorStyle = view.getComputedStyle(seat.anchor)
+  root.style.gridColumn = anchorStyle.gridColumn === '' ? 'auto' : anchorStyle.gridColumn
+  root.style.justifySelf = 'stretch'
+}
+
+/**
+ * Match the anchor's horizontal band inside a flex host.
+ *
+ * When the box is seated above the scroll viewport (see {@link
+ * refineSearchSeat}), the host column's inline padding belongs to the nav, not
+ * to the enclosing flex box. Measuring the anchor keeps the field flush with
+ * the session rows below without hardcoding the sidebar padding, and follows
+ * the column when the user widens the sidebar.
+ * @param {object} root - the box's root element.
+ * @param {{parent: object, anchor: object}} seat - resolved insertion point.
+ */
+export function alignFlexBand(root, seat) {
+  if (root === null || root === undefined || root.style === undefined) return
+  const parentRect = typeof seat.parent.getBoundingClientRect === 'function' ? seat.parent.getBoundingClientRect() : null
+  const anchorRect = typeof seat.anchor.getBoundingClientRect === 'function' ? seat.anchor.getBoundingClientRect() : null
+  if (parentRect === null || anchorRect === null) return
+  if (!(parentRect.width > 0) || !(anchorRect.width > 0)) return
+  root.style.marginLeft = `${Math.max(0, Math.round(anchorRect.left - parentRect.left))}px`
+  root.style.marginRight = `${Math.max(0, Math.round(parentRect.right - anchorRect.right))}px`
+}
+
+/**
  * Parse the persisted history.
  * @param {string | null | undefined} raw - the localStorage value.
  * @returns {Array<{sessionId: string, query: string, provider?: string, model?: string, at: number}>} newest first.
@@ -781,7 +855,7 @@ export function client(ctx, deps) {
 
   /** Insert (or re-insert) the box immediately under the New Session button. */
   function place() {
-    const seat = locateSearchSeat(document)
+    const seat = refineSearchSeat(locateSearchSeat(document), document.defaultView)
     if (seat === null) {
       // Rail mode / no list yet: the box has no seat, and must not linger.
       if (refs.root !== null && refs.root.parentNode !== null) refs.root.parentNode.removeChild(refs.root)
@@ -791,6 +865,7 @@ export function client(ctx, deps) {
     if (refs.root === null) refs.root = buildNode()
     const settled = refs.root.parentNode === seat.parent && refs.root.nextElementSibling === seat.anchor
     if (!settled) seat.parent.insertBefore(refs.root, seat.anchor)
+    alignToSeat(refs.root, seat)
     // The ring follows every session-list change; the pass is idempotent, so a
     // MutationObserver pass that found nothing new writes nothing.
     refreshRing()

@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.5.27 — 2026-11-24
+
+- 行为 1：修「改了宽度预设，输入框（composer）还是窄的、不跟插件走」。0.5.26 只把预设写进样式表，用户在旧版拖过一次宽度后，0.2.2 的 `ConversationWidthControls` 会把那份拖拽偏好以**内联** `--dsh-chat-user-width` 写在会话根上，内联优先于样式表，于是转写按宿主偏好（实测 640px）排、输入卡跟着 cardMax 变 672px，预设怎么点都不动。用户实测 `{"w":1256,"dpr":2,"roots":[{"userWidth":"640px","card":"672px"}]}`。
+- 根因：宽度有两个真相——样式表里的预设，与 localStorage `dsh.conversation.contentWidth`（宿主拖拽偏好，内联发布）。输入卡只认后者；0.5.26 只写了前者，所以要等下一次拖拽才会变。
+- 实现 1：`features/conversation-typography/src/index.js` 新增 `publishCoreWidth(width, view)`，在 `sync()` 里调用：预设变化时把同一宽度写进 `dsh.conversation.contentWidth`，并用 `dsh.ux-plus.typography.widthPreset` 记住已发布的值。只在预设真的变了才写，所以用户之后的拖拽仍赢；旧 profile 里存着历史宽度、没有标记，首挂载时写一次当前预设，把卡住的旧宽度纠正回来。发布必须等设置镜像就绪：`ConfigFormSnapshot.status` 为 `loading` 时快照只有 schema 默认值（`chatWidth: l` = 920），照写会把真实预设覆盖成默认值——实测 0.5.27 早期实现每次刷新先写 920 再写 1040。同时把 `--dsh-chat-user-width` 内联补到会话根上，同一帧就生效。
+- 行为 2：修「`直接问`（workspace-quick-search）在侧栏左上变成一排压扁的碎片、盖住【插件】」。0.2.2 的侧栏滚动区是 `display: grid`，列宽实测 `4px 264px 6px`；插件的搜索框是 `nav` 的前兄弟，自动排入第一列，于是被压成 4px 宽、各子元素散成 20–40px 的小方块，正好落在导航项上方。
+- 根因 2 的机制：`.scrollArea` 的 `grid-template-rows` 是 `8px max-content 2px max-content`，四行分别被 `::before`、面板 `nav`、`::after`、工作区区域钉住；多出来的子节点只能进隐式第五行——排在工作区列表**下面**，所以既被压窄又盖住导航。
+- 实现 2：`features/workspace-quick-search/src/index.js` 新增 `refineSearchSeat(seat, view)`——宿主滚动区是 grid 时把座位抬到外层 `.scrollRegion`（flex 列，滚动视口之上），搜索框因此仍在「新会话」按钮正下方，且不碰宿主行定义；新增 `alignFlexBand(root, seat)` 按 `nav` 与父级的矩形实测抄左右内缩（274 宽的列里 8/2，字段与列表同带宽），不写死侧栏 padding；`alignToSeat` 保留 grid 分支（宿主给到空闲单元格时直接抄 `grid-column`，并 `justify-self: stretch`）。
+- 测试：`tests/switches.test.mjs` 新增五条——预设拥有核心宽度键（旧值 640 被纠正为 920、拖拽 700 在重挂载后保留、未变化的预设不写）、`loading` 快照不发布默认值、`alignToSeat` 抄列/清列、`refineSearchSeat` 抬座位、`alignFlexBand` 抄内缩；`npm test` 149/149、`npm run build` 通过（R10 断言 8 文件、`lib/client.js` 251.37 kB）。
+- 验证：在 3082 验证宿主（复制候选 home、`dsh-ux-plus` 链接指向本 artifact）上用 CDP 实测两条修复，见 `validation/ux-plus-0.5.27-...md`。
+
 ## 0.5.26 — 2026-11-24
 
 - 行为：修「0.2.2 下输入框（composer）比转写窄一截」。用户截图 1440 宽窗口里输入卡 771px、消息列 1040px。实测（CDP 量 DOM）0.2.2 的输入卡 774.4px、turn 内容 1040px，差 266px。

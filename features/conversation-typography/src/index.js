@@ -100,6 +100,64 @@ const FONT_SIZES = {
 const WIDTHS = { s: 680, m: 800, l: 920, xl: 1040 }
 
 /**
+ * ui-conversation's drag preference key: the shell publishes the stored value
+ * as an INLINE `--dsh-chat-user-width` on the conversation root, which beats
+ * any stylesheet rule. A width preset therefore only reaches the composer when
+ * it owns this key too: otherwise a width the user dragged once keeps pinning
+ * the transcript and the composer while the preset only styles the rest.
+ */
+export const CORE_WIDTH_KEY = 'dsh.conversation.contentWidth'
+
+/** Last preset width this bundle published into {@link CORE_WIDTH_KEY}. */
+export const APPLIED_WIDTH_KEY = 'dsh.ux-plus.typography.widthPreset'
+
+/**
+ * Hand one preset width to ui-conversation, once per preset change.
+ *
+ * Why not publish on every mount: a later drag writes the same key, and the
+ * saved drag must survive reloads. Writing only when the preset itself moved
+ * keeps both intents ordered (last deliberate choice wins) and repairs the
+ * stale-drag case: a profile that still stores an old width has no marker yet,
+ * so the first mount after this build writes the current preset once.
+ * @param {number} width - preset width in px.
+ * @returns {boolean} whether a write happened (false when already applied).
+ */
+export function publishCoreWidth(width, view) {
+  const win = view === undefined ? (typeof window === 'undefined' ? null : window) : view
+  if (win === null || win === undefined) return false
+  let storage
+  try {
+    storage = win.localStorage
+  } catch {
+    return false
+  }
+  if (storage === null || storage === undefined) return false
+  const marker = String(width)
+  let current
+  try {
+    current = storage.getItem(APPLIED_WIDTH_KEY)
+  } catch {
+    return false
+  }
+  if (current === marker) return false
+  try {
+    storage.setItem(CORE_WIDTH_KEY, marker)
+    storage.setItem(APPLIED_WIDTH_KEY, marker)
+  } catch {
+    return false
+  }
+  // Move the composer in this frame as well: the shell republishes from the
+  // preference on its next layout pass, but the write above does not schedule
+  // one, so mirror what ConversationWidthControls() would set inline.
+  const body = win.document === undefined ? null : win.document.querySelector('[data-conversation-content]')
+  const target = body === null || body === undefined ? null : body.parentElement
+  if (target !== null && target !== undefined && typeof target.style.setProperty === 'function') {
+    target.style.setProperty('--dsh-chat-user-width', width + 'px')
+  }
+  return true
+}
+
+/**
  * Build the override CSS text for one section value. Token ownership (plan
  * R8): `--dsh-chat-content-width` / `--dsh-chat-user-width` belong to
  * ui-conversation and the `--dsw-font-markdown-base*` family to ui-theme —
@@ -248,7 +306,16 @@ export function client(ctx, deps) {
   }
 
   function sync() {
-    applyCss(scope.getSnapshot().value)
+    const snapshot = typeof scope.getSnapshot === 'function' ? scope.getSnapshot() : { value: undefined }
+    const value = snapshot === null || snapshot === undefined ? undefined : snapshot.value
+    applyCss(value)
+    // The settings mirror arrives asynchronously: while it is still loading the
+    // snapshot only carries the schema defaults, and publishing those would
+    // overwrite a stored width with the default on every reload (observed as
+    // 920 -> 1040 on one load). Publish only once the value is settled.
+    if (snapshot === null || snapshot === undefined || snapshot.status === undefined || snapshot.status === 'ready') {
+      publishCoreWidth(WIDTHS[value && value.chatWidth ? value.chatWidth : DEFAULT_CHAT_WIDTH] || WIDTHS[DEFAULT_CHAT_WIDTH])
+    }
   }
   sync()
   const offScope = scope.subscribe(sync)

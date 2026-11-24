@@ -444,6 +444,101 @@ test('conversation-typography: mount injects the style and row, dispose removes 
   }
 })
 
+test('workspace-quick-search: a pinned-row grid seat lifts to the enclosing flex column', async () => {
+  const { refineSearchSeat } = await import(featureUrl('workspace-quick-search').href)
+  const parent = { parentNode: 'OUTER' }
+  const seat = { parent, anchor: 'NAV' }
+  const grid = { getComputedStyle: () => ({ display: 'grid' }) }
+  assert.deepEqual(refineSearchSeat(seat, grid), { parent: 'OUTER', anchor: parent }, 'a fully pinned grid has no room for a fifth row')
+  const flex = { getComputedStyle: () => ({ display: 'flex' }) }
+  assert.equal(refineSearchSeat(seat, flex), seat, 'a flex seat is already the right row')
+  assert.equal(refineSearchSeat(null, flex), null)
+})
+
+test('workspace-quick-search: the flex band copies the nav insets', async () => {
+  const { alignFlexBand } = await import(featureUrl('workspace-quick-search').href)
+  const root = { style: {} }
+  const parent = { getBoundingClientRect: () => ({ left: 0, right: 274, width: 274 }) }
+  const anchor = { getBoundingClientRect: () => ({ left: 8, right: 272, width: 264 }) }
+  alignFlexBand(root, { parent, anchor })
+  assert.equal(root.style.marginLeft, '8px', 'the field starts where the session rows start')
+  assert.equal(root.style.marginRight, '2px', 'and ends at the list band edge')
+  const zero = { style: {} }
+  alignFlexBand(zero, { parent: { getBoundingClientRect: () => ({ left: 0, right: 0, width: 0 }) }, anchor })
+  assert.equal(zero.style.marginLeft, undefined, 'an unmeasured host leaves the box alone')
+})
+
+test('conversation-typography: the preset owns the core width preference without clobbering a newer drag', async () => {
+  const env = makeEnv()
+  installGlobals(env)
+  try {
+    const { feature, publishCoreWidth, CORE_WIDTH_KEY, APPLIED_WIDTH_KEY } =
+      await import(featureUrl('conversation-typography').href)
+    // A profile that dragged a width in an older build: no marker yet.
+    env.window.localStorage.setItem(CORE_WIDTH_KEY, '640')
+    const scope = makeScope({})
+    const ctx = makeCtx()
+    const dispose = feature.client(ctx, { tweakScope: scope, react: {} })
+    assert.equal(env.window.localStorage.getItem(CORE_WIDTH_KEY), '920', 'the preset replaces a stale drag once')
+    assert.equal(env.window.localStorage.getItem(APPLIED_WIDTH_KEY), '920', 'the applied marker records the preset it published')
+    dispose()
+    // A later drag writes the same key; remounting the same preset must keep it.
+    env.window.localStorage.setItem(CORE_WIDTH_KEY, '700')
+    const ctx2 = makeCtx()
+    const dispose2 = feature.client(ctx2, { tweakScope: makeScope({}), react: {} })
+    assert.equal(env.window.localStorage.getItem(CORE_WIDTH_KEY), '700', 'a newer deliberate drag survives the mount')
+    dispose2()
+    assert.equal(publishCoreWidth(920, env.window), false, 'an unchanged preset writes nothing')
+    assert.equal(publishCoreWidth(680, env.window), true, 'a changed preset writes once')
+    assert.equal(env.window.localStorage.getItem(CORE_WIDTH_KEY), '680')
+  } finally {
+    uninstallGlobals(env)
+  }
+})
+
+test('conversation-typography: a snapshot that is still loading never publishes its schema default', async () => {
+  const env = makeEnv()
+  installGlobals(env)
+  try {
+    const { feature, CORE_WIDTH_KEY, APPLIED_WIDTH_KEY } = await import(featureUrl('conversation-typography').href)
+    env.window.localStorage.setItem(CORE_WIDTH_KEY, '760')
+    env.window.localStorage.setItem(APPLIED_WIDTH_KEY, '1040')
+    const scope = makeScope({})
+    scope.getSnapshot = () => ({ status: 'loading', value: { chatWidth: 'l' } })
+    const dispose = feature.client(makeCtx(), { tweakScope: scope, react: {} })
+    assert.equal(env.window.localStorage.getItem(CORE_WIDTH_KEY), '760', 'the default 920 must not clobber a stored width while loading')
+    dispose()
+    const ctx = makeCtx()
+    const dispose2 = feature.client(ctx, { tweakScope: scope, react: {} })
+    assert.equal(env.window.localStorage.getItem(CORE_WIDTH_KEY), '760')
+    dispose2()
+  } finally {
+    uninstallGlobals(env)
+  }
+})
+
+test('workspace-quick-search: the box copies the nav grid column instead of auto-placing into the 4px gutter', async () => {
+  const { alignToSeat } = await import(featureUrl('workspace-quick-search').href)
+  const style = () => ({
+    removeProperty(name) {
+      const key = name === 'grid-column' ? 'gridColumn' : name === 'justify-self' ? 'justifySelf' : name
+      delete this[key]
+    },
+  })
+  const doc = { defaultView: { getComputedStyle: (el) => el.computed } }
+  const parent = { computed: { display: 'grid' } }
+  const anchor = { computed: { gridColumn: '2' } }
+  const root = { ownerDocument: doc, style: style() }
+  alignToSeat(root, { parent, anchor })
+  assert.equal(root.style.gridColumn, '2', 'the box lives in the column the host gives the panel nav')
+  assert.equal(root.style.justifySelf, 'stretch', 'and fills it instead of shrinking to its content')
+  parent.computed = { display: 'flex' }
+  alignToSeat(root, { parent, anchor })
+  assert.equal(root.style.gridColumn, undefined, 'a non-grid host drops the placement override')
+  const orphan = { ownerDocument: doc }
+  alignToSeat(orphan, { parent, anchor })
+})
+
 test('workspace-session-menu: native row copies its exact session ID and cleanup retires the slot and locale', async () => {
   const env = makeEnv()
   installGlobals(env)
