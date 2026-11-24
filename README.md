@@ -8,7 +8,7 @@ Small interface improvements for the DSH Web chat. Each feature has its own swit
 
 **English** · [简体中文](./README.zh-CN.md)
 
-**Targets the Web UI of [DeepSeek Harness 0.2.1-rc.1](https://github.com/deepseek-ai/deepseek-harness/releases/tag/dsh-v0.2.1-rc.1).**
+**Targets the Web UI of [DeepSeek Harness 0.2.2-rc.5](https://github.com/deepseek-ai/deepseek-harness/releases/tag/dsh-v0.2.2-rc.5).**
 
 ## New in 0.5.0 — the "create a workspace first" step is gone
 
@@ -157,8 +157,11 @@ npm run build   # tsdown emits lib/client.js (classic script, committed to the r
 
 ## Update log
 
-The five most recent entries; full history in [CHANGELOG.md](CHANGELOG.md).
+Recent entries; full history in [CHANGELOG.md](CHANGELOG.md).
 
+- **v0.5.27 · 2026-11-24** — The width preset reaches the composer by itself: it also writes the host's user-width key, so a width dragged once in an older build no longer pins the card narrow. The 「Quick ask」 box stops collapsing into slivers over the nav — its seat moves up to the sidebar's outer scroll region.
+- **v0.5.26 · 2026-11-24** — The composer is no longer narrower than the transcript (774 vs 1040px on a 1440 window): the width is published through the host's own `--dsh-chat-user-width` hook, so the card, the message column and the table spare all follow one axis.
+- **v0.5.25 · 2026-11-17** — A hover on the bubble right after a reload no longer wipes the search history: an empty session list that has not arrived yet is not read as "every session is gone".
 - **v0.5.24 · 2026-11-03** — The search box loses its clock icon: hovering the session bubble at its right end opens the history panel, and a click still reopens the newest search session.
 - **v0.5.23 · 2026-10-25** — A workspace holding an untitled session no longer falls back to the host's tall rows: its rows pair with the label the host actually renders, so the compact box, the pale-green Active block and the status dots come back.
 - **v0.5.22 · 2026-10-23** — Closing a workspace and opening it again comes back as the pale-green Active block only — history no longer tags along; a workspace with no Active row still opens like the host.
