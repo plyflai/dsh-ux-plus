@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.5.26 — 2026-11-24
+
+- 行为：修「0.2.2 下输入框（composer）比转写窄一截」。用户截图 1440 宽窗口里输入卡 771px、消息列 1040px。实测（CDP 量 DOM）0.2.2 的输入卡 774.4px、turn 内容 1040px，差 266px。
+- 根因：0.2.2 的 `ConversationRoot.module.css` `.body` 在自己的规则里同时算两个量——`--dsh-chat-content-width: var(--dsh-chat-user-width, clamp(680px, calc(column * 0.64), 920px))` 与 `--dsh-composer-card-max-width: calc(var(--dsh-chat-content-width) + 32px)`。cardMax 在 `.body` 这一层就已经解析完，所以把 `--dsh-chat-content-width` 写在 `.body` 的**后代**（本插件原来的 `div:has(> [data-conversation-scroll])` 与 `[data-conversation-scroll]`）只改转写、永远改不到输入卡。这个插件此前能改宽，是因为旧结构下那个后代选择器恰好吃到了 `.body` 自己的层级；0.2.2 在 `.body` 与滚动容器之间插了 frame 包装层，同一选择器降级成了 `.body` 的子元素，于是只有转写继续变宽。
+- 实现：`features/conversation-typography/src/index.js` 的 `buildCss()` 新增首条规则，把宽度经宿主自己的用户偏好钩子发布出去：`[data-phase="active"], [data-phase="hero"], [data-phase="settling"] { --dsh-chat-user-width: <width>px }`。phase 根是 `.body` 的祖先，`.body` 的 `var(--dsh-chat-user-width, clamp(...))` 因此解析成预设宽度，cardMax、消息列、气泡上限、表格 spare 一起跟着同一个轴变化。已有 token 归属注释与 JSDoc 同步写明 `--dsh-chat-user-width`。
+- 交互不冲突：`ConversationWidthControls` 把自己的偏好以**内联**方式写在同一元素上（并负责 `--dsh-conversation-column-width`），内联优先于插件样式表，所以用户拖过的宽度仍然赢；拖拽偏好清空后回落到本预设。
+- 测试：`tests/switches.test.mjs` 在两条 `--dsh-chat-content-width` 断言后各加一条 `--dsh-chat-user-width` 断言（默认 920px、切换到 s 后 680px）。`node --test tests/switches.test.mjs` 15/15、`npm test` 全绿、`npm run build` 通过（R10 断言 8 文件、lib/client.js 244.69 kB）。
+- 验证：在运行中的 0.2.2 宿主页面上用 CDP 直接给 phase 根设内联 `--dsh-chat-user-width: 1040px`——输入卡 774→1072px、转写 turn 保持 1089px（内容 1040），hero 页同样 774→1072。修复版 CSS 的最终效果与这次实测一致。
+
 ## 0.5.25 — 2026-11-17
 
 - 行为：修「刷新页面后 hover 会话气泡，历史面板变空、本地历史被永久清空」。用户报告的是「search 右侧对话小 icon 悬停不再展示历史」；真机取证（Chrome 的 `Local Storage/leveldb` 日志）显示 23 条历史在一次写入里被写成 `[]`，而那 23 条对应的会话在磁盘上全都还在，随后只补回了清空之后新搜的两条。

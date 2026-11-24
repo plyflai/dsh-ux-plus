@@ -101,9 +101,10 @@ const WIDTHS = { s: 680, m: 800, l: 920, xl: 1040 }
 
 /**
  * Build the override CSS text for one section value. Token ownership (plan
- * R8): `--dsh-chat-content-width` belongs to ui-conversation and the
- * `--dsw-font-markdown-base*` family to ui-theme — both are overridden ONLY
- * in this package's own injected <style>, never in host files.
+ * R8): `--dsh-chat-content-width` / `--dsh-chat-user-width` belong to
+ * ui-conversation and the `--dsw-font-markdown-base*` family to ui-theme —
+ * all of them are overridden ONLY in this package's own injected <style>,
+ * never in host files.
  * @param {object | undefined} value - the ui-tweak section value.
  * @returns {string} the CSS text.
  */
@@ -117,6 +118,19 @@ function buildCss(value) {
   const bubbleMax = Math.round(width * 0.7)
   const tableCellMax = Math.round(width * 0.43)
   return [
+    // The composer card derives from the conversation's own width axis: the
+    // ui-conversation `.body` rule computes
+    // `--dsh-composer-card-max-width: calc(var(--dsh-chat-content-width) + 32px)`
+    // ON `.body`, so substituting only `--dsh-chat-content-width` on a
+    // descendant (the scrollport) never widens the composer — its value was
+    // already resolved one level up. Publishing the width through the
+    // user-preference hook instead (`--dsh-chat-user-width`, consumed by the
+    // `.body` declaration as `var(--dsh-chat-user-width, clamp(...))`) moves
+    // the transcript AND the composer together, because both read the same
+    // axis. Phase roots are ancestors of `.body`, so inheritance applies.
+    '[data-phase="active"], [data-phase="hero"], [data-phase="settling"] {',
+    '  --dsh-chat-user-width: ' + width + 'px;',
+    '}',
     'div:has(> [data-conversation-scroll]) {',
     '  --dsh-chat-content-width: ' + width + 'px;',
     '  --dsw-font-markdown-base: ' + fontSize.assistantSize + 'px/' + fontSize.assistantLine + 'px var(--dsw-font-family);',
